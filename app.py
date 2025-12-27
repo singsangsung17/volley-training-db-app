@@ -182,7 +182,7 @@ with tab3:
 with tab4:
     st.markdown("#### 新增成效記錄（drill_results）")
 
-    # 只改這三行：players 多抓 grade_year
+    # 只改這三行：players 多抓 grade_year，並維持你的排序習慣即可
     sessions = df(con, "SELECT session_id, session_date, duration_min, theme FROM sessions ORDER BY session_date DESC;")
     drills   = df(con, "SELECT drill_id, drill_name FROM drills ORDER BY drill_name;")
     players  = df(con, "SELECT player_id, name, position, grade_year FROM players ORDER BY name;")
@@ -190,132 +190,173 @@ with tab4:
     if sessions.empty or drills.empty or players.empty:
         st.info("先新增場次、訓練項目、球員。")
     else:
-        c1, c2, c3, c4 = st.columns([1.2, 1.2, 1.2, 1])
+        # ✅ S3：用 form 包起來，按下按鈕才提交
+        with st.form("add_drill_result_form", clear_on_submit=False):
+            c1, c2, c3, c4 = st.columns([1.2, 1.2, 1.2, 1])
 
-        # ---------- c1: 場次（不顯示 id；顯示 12/15 綜合訓練（85min）） ----------
-        with c1:
-            def _session_label(r):
-                # session_date: 'YYYY-MM-DD' -> 'MM/DD'
-                s = (r.session_date or "").strip()
-                mmdd = s[5:7] + "/" + s[8:10] if len(s) >= 10 else s
+            # ---------- c1: 場次（不顯示 id；顯示 12/15 綜合訓練（85min）） ----------
+            with c1:
+                def _session_label(r):
+                    s = (r.session_date or "").strip()
+                    mmdd = s[5:7] + "/" + s[8:10] if len(s) >= 10 else s
 
-                theme = (getattr(r, "theme", "") or "").strip()
-                dur = getattr(r, "duration_min", None)
+                    theme = (getattr(r, "theme", "") or "").strip()
+                    dur = getattr(r, "duration_min", None)
 
-                # 顯示成：12/15 綜合訓練（85min）
-                dur_txt = f"（{int(dur)}min）" if dur is not None and str(dur).strip() != "" else ""
-                return f"{mmdd} {theme}{dur_txt}".strip() if theme else f"{mmdd}{dur_txt}".strip()
+                    dur_txt = f"（{int(dur)}min）" if dur is not None and str(dur).strip() != "" else ""
+                    return f"{mmdd} {theme}{dur_txt}".strip() if theme else f"{mmdd}{dur_txt}".strip()
 
-            session_map = {int(r.session_id): _session_label(r) for r in sessions.itertuples(index=False)}
+                session_map = {int(r.session_id): _session_label(r) for r in sessions.itertuples(index=False)}
+                session_id = st.selectbox(
+                    "場次",
+                    options=list(session_map.keys()),
+                    format_func=lambda sid: session_map[sid],
+                    key="r_session",
+                )
 
-            session_id = st.selectbox(
-                "場次",
-                options=list(session_map.keys()),
-                format_func=lambda sid: session_map[sid],
-                key="r_session",
-            )
-
-        # ---------- c2: 訓練項目（不顯示 id） ----------
-        with c2:
-            def _drill_label(r):
-                return (r.drill_name or "").strip()
-
-            drill_map = {int(r.drill_id): _drill_label(r) for r in drills.itertuples(index=False)}
-
-            drill_id = st.selectbox(
-                "訓練項目",
-                options=list(drill_map.keys()),
-                format_func=lambda did: drill_map[did],
-                key="r_drill",
-            )
-
-        # ---------- c3: 球員（A 球員（主攻｜大二）） ----------
-        with c3:
-            def _player_label(r):
-                name = (r.name or "").strip()
-                pos = (r.position or "").strip()
-                grade = (getattr(r, "grade_year", "") or "").strip()
-
-                if pos and grade:
-                    return f"{name}（{pos}｜{grade}）"
-                elif pos:
-                    return f"{name}（{pos}）"
-                elif grade:
-                    return f"{name}（{grade}）"
-                else:
-                    return name
-
-            player_map = {int(r.player_id): _player_label(r) for r in players.itertuples(index=False)}
-
-            player_id = st.selectbox(
-                "球員",
-                options=list(player_map.keys()),
-                format_func=lambda pid: player_map[pid],
-                key="r_player",
-            )
-
-        # ---------- c4: 失誤類型（可選） ----------
-        with c4:
-            error_type = st.text_input("失誤類型（可選）", key="r_err")
-
-        # 下面維持「可新增成效」的流程（完整恢復）
-        success_count = st.number_input("成功次數", min_value=0, value=0, step=1, key="r_succ")
-        total_count   = st.number_input("總次數",   min_value=0, value=0, step=1, key="r_total")
-        notes         = st.text_area("備註（可選）", height=90, key="r_notes")
-
-        if st.button("新增成效記錄", key="r_add"):
-            exec_one(
-                con,
-                """
-                INSERT INTO drill_results
-                (session_id, drill_id, player_id, success_count, total_count, error_type, notes)
-                VALUES (?, ?, ?, ?, ?, ?, ?);
-                """,
-                (
-                    int(session_id),
-                    int(drill_id),
-                    int(player_id),
-                    int(success_count),
-                    int(total_count),
-                    (error_type or "").strip(),
-                    (notes or "").strip(),
-                ),
-            )
-            st.success("已新增。")
-
-        st.markdown("---")
-        st.markdown("#### 成效記錄列表（drill_results）")
-        st.dataframe(
-            df(
+            # ✅ S1：drills 依照場次過濾（只顯示 session_drills 裡的 drill）
+            drills_in_session = df(
                 con,
                 """
                 SELECT
-                    r.result_id,
-                    s.session_date,
-                    s.theme,
+                    sd.drill_id,
                     d.drill_name,
-                    p.name AS player_name,
-                    p.position,
-                    p.grade_year,
-                    r.success_count,
-                    r.total_count,
-                    CASE
-                        WHEN r.total_count > 0 THEN ROUND(1.0 * r.success_count / r.total_count, 3)
-                        ELSE NULL
-                    END AS success_rate,
-                    r.error_type,
-                    r.recorded_at,
-                    r.notes
-                FROM drill_results r
-                JOIN sessions s ON s.session_id = r.session_id
-                JOIN drills   d ON d.drill_id   = r.drill_id
-                JOIN players  p ON p.player_id  = r.player_id
-                ORDER BY r.recorded_at DESC, r.result_id DESC;
+                    sd.sequence_no,
+                    sd.planned_minutes,
+                    sd.planned_reps
+                FROM session_drills sd
+                JOIN drills d ON d.drill_id = sd.drill_id
+                WHERE sd.session_id = ?
+                ORDER BY sd.sequence_no, d.drill_name;
                 """,
-            ),
-            use_container_width=True,
-            hide_index=True,
-        )
+                params=(int(session_id),),
+            )
+
+            # ---------- c2: 訓練項目（依場次過濾；不顯示 id） ----------
+            with c2:
+                if drills_in_session.empty:
+                    st.warning("這個場次尚未設定訓練項目（session_drills）。請先到 sessions/對應頁面把 drills 排進去。")
+                    drill_id = None
+                else:
+                    def _drill_label(r):
+                        name = (r.drill_name or "").strip()
+                        # 這裡不改資料流程，只是顯示更友善（不喜歡可改回只顯示 name）
+                        pm = r.planned_minutes
+                        pr = r.planned_reps
+                        extra = []
+                        if pm is not None and str(pm).strip() != "":
+                            extra.append(f"{int(pm)}min")
+                        if pr is not None and str(pr).strip() != "":
+                            extra.append(f"{int(pr)}次")
+                        extra_txt = f"（{'／'.join(extra)}）" if extra else ""
+                        return f"{name}{extra_txt}"
+
+                    drill_map = {int(r.drill_id): _drill_label(r) for r in drills_in_session.itertuples(index=False)}
+                    drill_id = st.selectbox(
+                        "訓練項目",
+                        options=list(drill_map.keys()),
+                        format_func=lambda did: drill_map[did],
+                        key="r_drill",
+                    )
+
+            # ---------- c3: 球員（A 球員（主攻｜大二）） ----------
+            with c3:
+                def _player_label(r):
+                    name = (r.name or "").strip()
+                    pos = (r.position or "").strip()
+                    grade = (getattr(r, "grade_year", "") or "").strip()
+
+                    if pos and grade:
+                        return f"{name}（{pos}｜{grade}）"
+                    elif pos:
+                        return f"{name}（{pos}）"
+                    elif grade:
+                        return f"{name}（{grade}）"
+                    else:
+                        return name
+
+                player_map = {int(r.player_id): _player_label(r) for r in players.itertuples(index=False)}
+                player_id = st.selectbox(
+                    "球員",
+                    options=list(player_map.keys()),
+                    format_func=lambda pid: player_map[pid],
+                    key="r_player",
+                )
+
+            # ---------- c4: 原本流程（先保留 text_input；S級不要求改成選單） ----------
+            with c4:
+                error_type = st.text_input("失誤類型（可選）", key="r_err")
+
+            # 其他欄位（照你原本習慣）
+            success_count = st.number_input("成功次數", min_value=0, value=0, step=1, key="r_success")
+            total_count   = st.number_input("總次數",   min_value=0, value=0, step=1, key="r_total")
+            notes         = st.text_area("備註（可選）", height=80, key="r_notes")
+
+            submitted = st.form_submit_button("新增成效記錄")
+
+            if submitted:
+                # ✅ S2：驗證（阻止不合理資料）
+                if drill_id is None:
+                    st.error("此場次沒有可選的訓練項目，請先設定 session_drills。")
+                elif total_count <= 0:
+                    st.error("總次數必須大於 0。")
+                elif success_count > total_count:
+                    st.error("成功次數不能大於總次數。")
+                else:
+                    con.execute(
+                        """
+                        INSERT INTO drill_results
+                            (session_id, drill_id, player_id, success_count, total_count, error_type, notes)
+                        VALUES
+                            (?, ?, ?, ?, ?, ?, ?);
+                        """,
+                        (
+                            int(session_id),
+                            int(drill_id),
+                            int(player_id),
+                            int(success_count),
+                            int(total_count),
+                            (error_type or "").strip(),
+                            (notes or "").strip(),
+                        ),
+                    )
+                    con.commit()
+                    st.success("已新增。")
+                    st.rerun()
+
+    # ✅ 成效範例列表：完整恢復（請務必放在 if/else 外面，避免被吃掉）
+    st.markdown("---")
+    st.markdown("#### 成效記錄列表（drill_results）")
+    st.dataframe(
+        df(
+            con,
+            """
+            SELECT
+                r.result_id,
+                s.session_date,
+                s.theme,
+                d.drill_name,
+                p.name AS player_name,
+                p.position,
+                p.grade_year,
+                r.success_count,
+                r.total_count,
+                CASE
+                    WHEN r.total_count > 0 THEN ROUND(1.0 * r.success_count / r.total_count, 3)
+                    ELSE NULL
+                END AS success_rate,
+                r.error_type,
+                r.recorded_at,
+                r.notes
+            FROM drill_results r
+            JOIN sessions s ON s.session_id = r.session_id
+            JOIN drills   d ON d.drill_id   = r.drill_id
+            JOIN players  p ON p.player_id  = r.player_id
+            ORDER BY r.recorded_at DESC, r.result_id DESC;
+            """,
+        ),
+        use_container_width=True,
+    )
 
 
 
