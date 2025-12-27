@@ -320,6 +320,17 @@ with tab4:
         primary_options = _options_for_focus(focus)
         secondary_options = [x for x in primary_options if x not in ("無（僅紀錄）")]  # 次要不需要「無」
 
+        # ✅ 放在 st.form 之前：會隨輸入即時 rerun
+        success_count = st.number_input("成功次數（可選）", min_value=0, value=0, step=1, key="t4_success")
+        total_count   = st.number_input("總次數（可選）",   min_value=0, value=0, step=1, key="t4_total")
+
+    if total_count > 0:
+        rate = success_count / total_count
+        st.caption(f"成功率：{rate:.0%}（{success_count}/{total_count}）")
+    else:
+        st.caption("成功率：—（請先填總次數）")
+
+
         # =========================
         # ❷ 提交區放在 form 內：避免重跑造成流程亂
         # =========================
@@ -337,9 +348,10 @@ with tab4:
                 pass
 
 
-            success_count = st.number_input("成功次數（可選）", min_value=0, value=0, step=1, key="t4_success")
-            total_count   = st.number_input("總次數（可選）",   min_value=0, value=0, step=1, key="t4_total")
-
+            # ✅ form 內只讀值，不再放 number_input（避免不即時）
+            success_count = int(st.session_state.get("t4_success", 0))
+            total_count   = int(st.session_state.get("t4_total", 0))
+ 
             # ✅ 成功率即時顯示（填完立刻看得懂）
             if total_count and total_count > 0:
                 rate = success_count / total_count
