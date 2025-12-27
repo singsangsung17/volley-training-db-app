@@ -547,5 +547,3 @@ with tab5:
             GROUP BY COALESCE(NULLIF(TRIM(r.error_type),''), '(未填)')
             ORDER BY error_events DESC;
         """), use_container_width=True, hide_index=True)
-
-翻譯
