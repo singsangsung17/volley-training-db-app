@@ -63,7 +63,7 @@ with tab1:
     with colL:
         st.markdown("#### 新增球員")
         name = st.text_input("姓名", key="p_name")
-        position = st.text_input("位置（例：主攻/舉球/自由/副攻）", key="p_pos")
+        position = st.text_input("位置（例：主攻/舉球/自由/副攻/攔中）", key="p_pos")
         grade_year = st.text_input("年級（例：大一/大二）", key="p_grade")
         if st.button("新增球員", key="p_add"):
             if not name.strip():
