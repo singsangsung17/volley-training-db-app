@@ -88,7 +88,7 @@ with tab1:
     with colL:
         st.markdown("#### 新增球員")
         name = st.text_input("姓名", key="p_name")
-        POS_OPTIONS = ["（不填）", "主攻", "副攻", "攔中", "舉球", "自由"]
+        POS_OPTIONS = ["主攻", "攔中", "副攻", "舉球", "自由", "（不填）"]
         pos_sel = st.selectbox("位置（可選）", POS_OPTIONS, index=0, key="p_pos_sel")
         position = "" if pos_sel == "（不填）" else pos_sel
 
