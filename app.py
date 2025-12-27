@@ -273,10 +273,12 @@ with tab4:
         return "綜合"
 
     def _options_for_focus(focus: str) -> list[str]:
-    base = TARGETS_BY_FOCUS.get(focus, TARGETS_BY_FOCUS["綜合"])
-    # 把「無（僅紀錄）」放到最後；確保不重複
-    base2 = [x for x in base if x != "無（僅紀錄）"]
-    return base2 + ["其他（自行輸入）", "無（僅紀錄）"]
+        base = TARGETS_BY_FOCUS.get(focus, TARGETS_BY_FOCUS.get("綜合", []))
+
+        # 把「無（僅記錄）」放最後，確保不重複
+        base2 = [x for x in base if x != "無（僅記錄）"]
+        return base2 + ["其他（自行輸入）", "無（僅記錄）"]
+
 
     if sessions.empty or players.empty:
         st.info("先新增場次、球員。")
