@@ -174,20 +174,18 @@ drill_id = st.selectbox(
     format_func=lambda did: f"{did}｜{drill_map[did]}",
 )
 
-format_func=lambda sid: session_map[sid]
-format_func=lambda did: drill_map[did]
+sequence_no = st.number_input("順序（sequence_no）", min_value=1, value=1, step=1)
+planned_minutes = st.number_input("預計分鐘（可選）", min_value=0, value=20, step=5)
+planned_reps = st.number_input("預計次數（可選）", min_value=0, value=50, step=5)
 
-
-            sequence_no = st.number_input("順序（sequence_no）", min_value=1, value=1, step=1)
-            planned_minutes = st.number_input("預計分鐘（可選）", min_value=0, value=20, step=5)
-            planned_reps = st.number_input("預計次數（可選）", min_value=0, value=50, step=5)
-            if st.button("加入場次", key="sd_add"):
-                exec_one(con, """
-                    INSERT OR REPLACE INTO session_drills
-                    (session_id, drill_id, sequence_no, planned_minutes, planned_reps)
-                    VALUES (?, ?, ?, ?, ?);
-                """, (session_id, drill_id, int(sequence_no), int(planned_minutes), int(planned_reps)))
-                st.success("已加入/更新。")
+if st.button("加入場次", key="sd_add"):
+    exec_one(con, """
+        INSERT OR REPLACE INTO session_drills
+        (session_id, drill_id, sequence_no, planned_minutes, planned_reps)
+        VALUES (?, ?, ?, ?, ?);
+    """, (session_id, drill_id, int(sequence_no), int(planned_minutes), int(planned_reps)))
+    st.success("已加入/更新。")
+    st.rerun()
 
     with colR:
         st.markdown("#### 場次列表")
