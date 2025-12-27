@@ -190,74 +190,71 @@ with tab4:
     if sessions.empty or drills.empty or players.empty:
         st.info("先新增場次、訓練項目、球員。")
     else:
-        c1, c2, c3, c4 = st.columns([1.2, 1.2, 1.2, 1])
+      c1, c2, c3, c4 = st.columns([1.2, 1.2, 1.2, 1])
 
-        # ---------- c1: 場次（不顯示 id） ----------
-      with c1:
-    def _session_label(r):
-        # session_date: 'YYYY-MM-DD' -> 'MM/DD'
-        s = (r.session_date or "").strip()
-        mmdd = s[5:7] + "/" + s[8:10] if len(s) >= 10 else s
+    # ---------- c1: 場次（不顯示 id；顯示 12/15 綜合訓練（85min）） ----------
+    with c1:
+        def _session_label(r):
+            # session_date: 'YYYY-MM-DD' -> 'MM/DD'
+            s = (r.session_date or "").strip()
+            mmdd = s[5:7] + "/" + s[8:10] if len(s) >= 10 else s
 
-        theme = (getattr(r, "theme", "") or "").strip()
+            theme = (getattr(r, "theme", "") or "").strip()
+            dur = getattr(r, "duration_min", None)
 
-        # 兼容：如果 sessions 查詢沒帶 duration_min，也不會炸
-        dur = getattr(r, "duration_min", None)
-        dur_txt = f"（{int(dur)}min）" if dur not in (None, "") else ""
+            # 顯示成：12/15 綜合訓練（85min）
+            dur_txt = f"（{int(dur)}min）" if dur is not None and str(dur).strip() != "" else ""
+            return f"{mmdd} {theme}{dur_txt}".strip() if theme else f"{mmdd}{dur_txt}".strip()
 
-        return f"{mmdd} {theme}{dur_txt}".strip() if theme else f"{mmdd}{dur_txt}".strip()
+        session_map = {int(r.session_id): _session_label(r) for r in sessions.itertuples(index=False)}
 
-    session_map = {int(r.session_id): _session_label(r) for r in sessions.itertuples(index=False)}
+        session_id = st.selectbox(
+            "場次",
+            options=list(session_map.keys()),
+            format_func=lambda sid: session_map[sid],
+            key="r_session",
+        )
 
-    session_id = st.selectbox(
-        "場次",
-        options=list(session_map.keys()),
-        format_func=lambda sid: session_map[sid],
-        key="r_session",
-    )
+    # ---------- c2: 訓練項目（不顯示 id） ----------
+    with c2:
+        def _drill_label(r):
+            return (r.drill_name or "").strip()
 
+        drill_map = {int(r.drill_id): _drill_label(r) for r in drills.itertuples(index=False)}
 
-        # ---------- c2: 訓練項目（不顯示 id） ----------
-        with c2:
-            def _drill_label(r):
-                return (r.drill_name or "").strip()
+        drill_id = st.selectbox(
+            "訓練項目",
+            options=list(drill_map.keys()),
+            format_func=lambda did: drill_map[did],
+            key="r_drill",
+        )
 
-            drill_map = {int(r.drill_id): _drill_label(r) for r in drills.itertuples(index=False)}
+    # ---------- c3: 球員（小涵（主攻｜大二）） ----------
+    with c3:
+        def _player_label(r):
+            name = (r.name or "").strip()
+            pos = (r.position or "").strip()
+            grade = (getattr(r, "grade_year", "") or "").strip()
 
-            drill_id = st.selectbox(
-                "訓練項目",
-                options=list(drill_map.keys()),
-                format_func=lambda did: drill_map[did],
-                key="r_drill",
-            )
+            if pos and grade:
+                return f"{name}（{pos}｜{grade}）"
+            elif pos:
+                return f"{name}（{pos}）"
+            elif grade:
+                return f"{name}（{grade}）"
+            else:
+                return name
 
-        # ---------- c3: 球員（小涵（主攻｜大二）） ----------
-        with c3:
-            def _player_label(r):
-                name = (r.name or "").strip()
-                pos = (r.position or "").strip()
-                grade = (r.grade_year or "").strip()
+        player_map = {int(r.player_id): _player_label(r) for r in players.itertuples(index=False)}
 
-                if pos and grade:
-                    return f"{name}（{pos}｜{grade}）"
-                elif pos and not grade:
-                    return f"{name}（{pos}）"
-                elif (not pos) and grade:
-                    return f"{name}（{grade}）"
-                else:
-                    return name
+        player_id = st.selectbox(
+            "球員",
+            options=list(player_map.keys()),
+            format_func=lambda pid: player_map[pid],
+            key="r_player",
+        )
 
-            player_map = {int(r.player_id): _player_label(r) for r in players.itertuples(index=False)}
-
-            player_id = st.selectbox(
-                "球員",
-                options=list(player_map.keys()),
-                format_func=lambda pid: player_map[pid],
-                key="r_player",
-            )
-
-        # ✅ c4 以下全部維持你原本的程式碼（不要改）
-        with c4:
+    with c4:
             error_type = st.text_input("失誤類型（可選）", key="r_err")
             # ... 你原本 success_count / total_count / notes / INSERT INTO drill_results 那段照舊
 
