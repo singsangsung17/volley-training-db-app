@@ -185,7 +185,7 @@ with tab4:
     sessions = df(con, "SELECT session_id, session_date, duration_min, theme FROM sessions ORDER BY session_date DESC;")
     players  = df(con, "SELECT player_id, name, position, grade_year FROM players ORDER BY name;")
 
-    # 確保有「本場次總結」這個 drill（因為 drill_results.drill_id 是 NOT NULL）
+    # 確保有「本場次總結」這個 drill（drill_results.drill_id 是 NOT NULL）
     summary_row = df(con, "SELECT drill_id FROM drills WHERE drill_name = '本場次總結' LIMIT 1;")
     if summary_row.empty:
         exec_one(
@@ -196,174 +196,172 @@ with tab4:
         summary_row = df(con, "SELECT drill_id FROM drills WHERE drill_name = '本場次總結' LIMIT 1;")
     summary_drill_id = int(summary_row.iloc[0]["drill_id"])
 
-    # --- 常見問題字典：依 drills.category 連動 ---
-    TARGETS_BY_CATEGORY = {
-        "attack_chain": [
-            "攻擊點選擇", "助跑節奏", "起跳時機", "擊球點太低/太後", "線路控制不穩",
-            "手腕控制/出手不穩", "與舉球配合", "舉球高度/位置不穩", "攻防轉換慢",
-        ],
-        "serve_receive": [
-            "接發不到位", "接發平台角度不穩", "腳步不到位", "落點判斷慢",
-            "起手晚/手型不穩", "重心不穩", "溝通喊聲不足",
-        ],
-        "defense": [
-            "防守判斷慢", "移動腳步不到位", "手型/面向不對", "補位站位錯",
-            "防守後續處理慢", "反應慢",
-        ],
-        "serve": [
-            "發球失誤", "落點不準", "拋球不穩", "節奏不穩",
-            "力量/旋轉不足", "壓迫性不足",
-        ],
-        "summary": [
-            "專注度/失誤率高", "溝通不足", "站位/輪轉錯", "節奏感不穩", "體能不足",
-        ],
-        "other": [
-            "專注度/失誤率高", "溝通不足", "站位/輪轉錯", "節奏感不穩", "體能不足",
-        ],
-        "": [
-            "專注度/失誤率高", "溝通不足", "站位/輪轉錯", "節奏感不穩", "體能不足",
-        ],
+    # --- 面向 -> 常見錯誤（你可持續擴充） ---
+    TARGETS_BY_FOCUS = {
+        "攻擊": ["助跑節奏", "起跳時機", "未確實擺臂", "擊球點太低/太後", "攻擊點選擇", "線路控制不穩", "力量控制不當", "與舉球配合", "被攔原因（打點/線路/節奏）"],
+        "接發": ["接發不到位", "平台角度不穩", "腳步不到位", "落點判斷慢", "手型不穩", "重心不穩", "溝通喊聲不足"],
+        "防守": ["判斷慢", "移動腳步不到位", "站位錯（線/斜）", "手型/面向不對", "起球高度不足", "方向控制差", "補位慢"],
+        "發球": ["發球失誤", "拋球不穩", "落點不準", "節奏不穩", "壓迫性不足", "力量/旋轉不足", "關鍵分心理波動"],
+        "舉球": ["高度不穩", "太貼網/太離網", "節奏不對", "位置不到位", "配合不佳（攻手節奏）", "傳球選擇不佳"],
+        "攔網": ["手型不對（封角度）", "起跳時機不對", "橫移慢跟不上", "漏人/判斷錯攔誰", "手未伸過網", "高度不足"],
+        "綜合": ["專注度不足", "溝通不足", "輪轉/站位錯", "節奏感不穩", "體能不足", "連鎖失誤控制"],
     }
 
-    def _infer_categories_for_session(sess_id: int) -> list[str]:
-        # 以該場次安排過的 drills.category 為主；若該場次未安排 drills，fallback 到 theme 關鍵字推測
-        cats = df(
+    def _session_label(r):
+        s = (r.session_date or "").strip()
+        mmdd = s[5:7] + "/" + s[8:10] if len(s) >= 10 else s
+        theme = (getattr(r, "theme", "") or "").strip()
+        dur = getattr(r, "duration_min", None)
+        dur_txt = f"（{int(dur)}min）" if dur is not None and str(dur).strip() != "" else ""
+        return f"{mmdd} {theme}{dur_txt}".strip() if theme else f"{mmdd}{dur_txt}".strip()
+
+    def _player_label(r):
+        name = (r.name or "").strip()
+        pos = (r.position or "").strip()
+        grade = (getattr(r, "grade_year", "") or "").strip()
+        if pos and grade:
+            return f"{name}（{pos}｜{grade}）"
+        elif pos:
+            return f"{name}（{pos}）"
+        elif grade:
+            return f"{name}（{grade}）"
+        else:
+            return name
+
+    def _infer_focus_from_session(sess_id: int) -> str:
+        """
+        透過「數據蒐集項目」推斷面向：
+        1) 先看該場次 session_drills 連到 drills.category / drill_name
+        2) 沒排 drills 時，用 sessions.theme 關鍵字 fallback
+        """
+        # 1) 從 session_drills + drills.category
+        rows = df(
             con,
             """
-            SELECT DISTINCT COALESCE(NULLIF(TRIM(d.category), ''), 'other') AS category
+            SELECT d.category, d.drill_name
             FROM session_drills sd
             JOIN drills d ON d.drill_id = sd.drill_id
             WHERE sd.session_id = ?
             """,
             (int(sess_id),),
         )
-        if not cats.empty:
-            return [str(x).strip() for x in cats["category"].tolist() if str(x).strip()]
 
-        # fallback：看 theme 關鍵字
-        row = df(con, "SELECT theme FROM sessions WHERE session_id = ? LIMIT 1;", (int(sess_id),))
-        theme = "" if row.empty else (row.iloc[0]["theme"] or "")
-        t = str(theme)
+        text = ""
+        if not rows.empty:
+            cats = " ".join([(str(x) if x is not None else "") for x in rows["category"].tolist()])
+            names = " ".join([(str(x) if x is not None else "") for x in rows["drill_name"].tolist()])
+            text = (cats + " " + names)
 
-        guessed = []
-        if "攻擊" in t:
-            guessed.append("attack_chain")
-        if "接發" in t or "一傳" in t:
-            guessed.append("serve_receive")
-        if "防守" in t:
-            guessed.append("defense")
-        if "發球" in t:
-            guessed.append("serve")
-        if "綜合" in t or not guessed:
-            guessed.append("summary")
-        return guessed
+        # 2) fallback 用 theme
+        row2 = df(con, "SELECT theme FROM sessions WHERE session_id=? LIMIT 1;", (int(sess_id),))
+        theme = "" if row2.empty else (row2.iloc[0]["theme"] or "")
+        text2 = (text + " " + str(theme))
 
-    def _build_target_options(categories: list[str]) -> list[str]:
-        # 合併多個 category 的清單，去重但保留順序
-        merged = []
-        seen = set()
-        for c in categories:
-            for item in TARGETS_BY_CATEGORY.get(c, TARGETS_BY_CATEGORY["summary"]):
-                if item not in seen:
-                    merged.append(item)
-                    seen.add(item)
-        # 再加上通用項
-        for item in TARGETS_BY_CATEGORY["summary"]:
-            if item not in seen:
-                merged.append(item)
-                seen.add(item)
-        # 最後加上「無/其他」
-        return ["無（僅紀錄）"] + merged + ["其他（自行輸入）"]
+        # 關鍵字/類別判斷（可自行加強）
+        if any(k in text2 for k in ["attack_chain", "攻擊"]):
+            return "攻擊"
+        if any(k in text2 for k in ["serve_receive", "接發", "一傳"]):
+            return "接發"
+        if any(k in text2 for k in ["defense", "防守"]):
+            return "防守"
+        if any(k in text2 for k in ["serve", "發球"]):
+            return "發球"
+        if any(k in text2 for k in ["set", "舉球", "二傳"]):
+            return "舉球"
+        if any(k in text2 for k in ["block", "攔網", "攔中"]):
+            return "攔網"
+        return "綜合"
+
+    def _options_for_focus(focus: str) -> list[str]:
+        base = TARGETS_BY_FOCUS.get(focus, TARGETS_BY_FOCUS["綜合"])
+        # 主要：允許「無」；次要：不放「無」
+        return ["無（僅紀錄）"] + base + ["其他（自行輸入）"]
 
     if sessions.empty or players.empty:
         st.info("先新增場次、球員。")
     else:
-        with st.form("add_result_targets_form", clear_on_submit=False):
-            c1, c2, c3 = st.columns([1.4, 1.3, 1.3])
+        # =========================
+        # ❶ 控制器放在 form 外面：改了就會 rerun → 達成真正連動
+        # =========================
+        top1, top2, top3 = st.columns([1.4, 1.3, 1.3])
 
-            # ---------- c1: 場次（12/15 綜合訓練（85min）） ----------
+        with top1:
+            session_map = {int(r.session_id): _session_label(r) for r in sessions.itertuples(index=False)}
+            session_id = st.selectbox(
+                "場次",
+                options=list(session_map.keys()),
+                format_func=lambda sid: session_map[sid],
+                key="t4_session",
+            )
+
+        with top2:
+            player_map = {int(r.player_id): _player_label(r) for r in players.itertuples(index=False)}
+            player_id = st.selectbox(
+                "球員",
+                options=list(player_map.keys()),
+                format_func=lambda pid: player_map[pid],
+                key="t4_player",
+            )
+
+        # 推斷預設面向，並允許你手動「點選攻擊」
+        inferred_focus = _infer_focus_from_session(int(session_id))
+        with top3:
+            focus = st.selectbox(
+                "面向（連動主要/次要）",
+                options=["攻擊", "接發", "防守", "發球", "舉球", "攔網", "綜合"],
+                index=["攻擊", "接發", "防守", "發球", "舉球", "攔網", "綜合"].index(inferred_focus),
+                key="t4_focus",
+            )
+
+        # 依面向建立選項（主要/次要都用同一組）
+        primary_options = _options_for_focus(focus)
+        secondary_options = [x for x in primary_options if x not in ("無（僅紀錄）")]  # 次要不需要「無」
+
+        # =========================
+        # ❷ 提交區放在 form 內：避免重跑造成流程亂
+        # =========================
+        with st.form("t4_submit_form", clear_on_submit=False):
+            c1, c2 = st.columns([1.3, 1.3])
+
             with c1:
-                def _session_label(r):
-                    s = (r.session_date or "").strip()
-                    mmdd = s[5:7] + "/" + s[8:10] if len(s) >= 10 else s
-                    theme = (getattr(r, "theme", "") or "").strip()
-                    dur = getattr(r, "duration_min", None)
-                    dur_txt = f"（{int(dur)}min）" if dur is not None and str(dur).strip() != "" else ""
-                    return f"{mmdd} {theme}{dur_txt}".strip() if theme else f"{mmdd}{dur_txt}".strip()
-
-                session_map = {int(r.session_id): _session_label(r) for r in sessions.itertuples(index=False)}
-                session_id = st.selectbox(
-                    "場次",
-                    options=list(session_map.keys()),
-                    format_func=lambda sid: session_map[sid],
-                    key="r_session",
-                )
-
-            # ---------- c2: 球員（A 球員（主攻｜大二）） ----------
-            with c2:
-                def _player_label(r):
-                    name = (r.name or "").strip()
-                    pos = (r.position or "").strip()
-                    grade = (getattr(r, "grade_year", "") or "").strip()
-                    if pos and grade:
-                        return f"{name}（{pos}｜{grade}）"
-                    elif pos:
-                        return f"{name}（{pos}）"
-                    elif grade:
-                        return f"{name}（{grade}）"
-                    else:
-                        return name
-
-                player_map = {int(r.player_id): _player_label(r) for r in players.itertuples(index=False)}
-                player_id = st.selectbox(
-                    "球員",
-                    options=list(player_map.keys()),
-                    format_func=lambda pid: player_map[pid],
-                    key="r_player",
-                )
-
-            # ---------- c3: 主要修正目標（依場次連動） ----------
-            with c3:
-                cats = _infer_categories_for_session(int(session_id))
-                primary_options = _build_target_options(cats)
-
-                primary_choice = st.selectbox("主要修正目標（可選）", options=primary_options, key="r_primary")
+                primary_choice = st.selectbox("主要修正目標（可選）", options=primary_options, key="t4_primary")
 
                 primary_other = ""
                 if primary_choice == "其他（自行輸入）":
-                    primary_other = st.text_input("主要修正目標：其他（請輸入）", key="r_primary_other")
+                    primary_other = st.text_input("主要修正目標：其他（請輸入）", key="t4_primary_other")
 
-            # --- 量化欄位（維持原流程） ---
-            success_count = st.number_input("成功次數（可選）", min_value=0, value=0, step=1, key="r_success")
-            total_count   = st.number_input("總次數（可選）",   min_value=0, value=0, step=1, key="r_total")
+            with c2:
+                # 若你希望顯示「你目前選的面向」，可保留；不需要可刪
+                st.caption(f"目前面向：{focus}（由場次推斷：{inferred_focus}）")
 
-            # ✅ 你要求：次要修正目標放在「總次數之下、備註之上」
-            cats2 = _infer_categories_for_session(int(session_id))
-            secondary_base = _build_target_options(cats2)
+            success_count = st.number_input("成功次數（可選）", min_value=0, value=0, step=1, key="t4_success")
+            total_count   = st.number_input("總次數（可選）",   min_value=0, value=0, step=1, key="t4_total")
 
-            # 次要不需要「無（僅紀錄）」；另外避免把「其他」當一般值
-            secondary_options = [x for x in secondary_base if x not in ("無（僅紀錄）")]
+            # 次要修正目標：放在總次數之下、備註之上（照你要求）
             secondary_sel = st.multiselect(
                 "次要修正目標（可複選｜可選）",
                 options=secondary_options,
                 default=[],
-                key="r_secondary",
+                key="t4_secondary",
             )
 
             secondary_other = ""
             if "其他（自行輸入）" in secondary_sel:
-                secondary_other = st.text_input("次要修正目標：其他（可用逗號或頓號分隔）", key="r_secondary_other")
+                secondary_other = st.text_input(
+                    "次要修正目標：其他（可用逗號或頓號分隔）",
+                    key="t4_secondary_other",
+                )
 
-            notes = st.text_area("備註（可選）", height=90, key="r_notes")
+            notes = st.text_area("備註（可選）", height=90, key="t4_notes")
 
             submitted = st.form_submit_button("新增成效記錄")
 
             if submitted:
-                # 防呆：成功不得大於總次數（若總次數=0，代表你只想記質性觀察，也允許）
+                # 防呆：若總次>0 才檢查 success<=total；總次=0 代表純質性記錄，允許
                 if total_count > 0 and success_count > total_count:
                     st.error("成功次數不能大於總次數。")
                 else:
-                    # 主目標決定：無/空 -> 存空字串；其他 -> 用輸入
+                    # 主要目標 resolve
                     if primary_choice == "無（僅紀錄）":
                         main_target = ""
                     elif primary_choice == "其他（自行輸入）":
@@ -371,24 +369,21 @@ with tab4:
                     else:
                         main_target = (primary_choice or "").strip()
 
-                    # 次目標整理：去掉「其他」占位，並加上自由輸入拆分
+                    # 次要目標 resolve（去掉占位「其他」並合併自由輸入）
                     sec_targets = [x for x in secondary_sel if x != "其他（自行輸入）"]
-                    if secondary_other.strip():
+                    if (secondary_other or "").strip():
                         raw = secondary_other.replace("，", ",").replace("、", ",")
                         sec_targets += [t.strip() for t in raw.split(",") if t.strip()]
 
-                    # 將次要目標寫進 notes 第一行前綴（不改 schema）
-                    sec_prefix = ""
-                    if sec_targets:
-                        # 去重但保留順序
-                        seen = set()
-                        uniq = []
-                        for t in sec_targets:
-                            if t not in seen:
-                                uniq.append(t)
-                                seen.add(t)
-                        sec_prefix = f"[次要修正目標] {'、'.join(uniq)}"
+                    # 去重保序
+                    seen = set()
+                    uniq = []
+                    for t in sec_targets:
+                        if t and t not in seen:
+                            uniq.append(t)
+                            seen.add(t)
 
+                    sec_prefix = f"[次要修正目標] {'、'.join(uniq)}" if uniq else ""
                     final_notes = (notes or "").strip()
                     if sec_prefix:
                         final_notes = sec_prefix if not final_notes else (sec_prefix + "\n" + final_notes)
@@ -406,8 +401,8 @@ with tab4:
                             int(player_id),
                             int(success_count),
                             int(total_count),
-                            main_target,
-                            final_notes,
+                            main_target,      # 主修正目標 -> error_type
+                            final_notes,      # 次要目標前綴 + 備註
                         ),
                     )
                     st.success("已新增。")
@@ -415,7 +410,6 @@ with tab4:
 
     st.markdown("---")
     st.markdown("#### 成效記錄列表（最近 200 筆）")
-
     st.dataframe(
         df(
             con,
@@ -459,7 +453,6 @@ with tab4:
         use_container_width=True,
         hide_index=True,
     )
-
 
 
 # ---- Tab 5: Analytics ----
