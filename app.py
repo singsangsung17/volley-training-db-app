@@ -219,128 +219,55 @@ with colR:
         hide_index=True
     )
 
-
-
 # ---- Tab 3: Sessions ----
 with tab3:
-    # 這兩個小工具讓你可以「查重 / 取回 inserted id / 取 max(sequence_no)」且保持參數化（避免自己拼 SQL）
-    def fetch_one(con, sql, params=()):
-        cur = con.cursor()
-        cur.execute(sql, params)
-        row = cur.fetchone()
-        cur.close()
-        return row
-
     colL, colR = st.columns([1, 1])
 
-    # 先把場次與訓練項目撈出來（左側「選場次」會用到）
-    sessions = df(con, """
-        SELECT session_id, session_date, duration_min, theme
-        FROM sessions
-        ORDER BY session_date DESC, session_id DESC;
-    """)
-    drills = df(con, "SELECT drill_id, drill_name FROM drills ORDER BY drill_name;")
-
     with colL:
-        st.markdown("#### 場次操作")
+        st.markdown("#### 新增訓練場次")
+        session_date = st.date_input("日期", key="s_date")
+        duration_min = st.number_input("總時長（分鐘）", min_value=0, value=120, step=5, key="s_dur")
+        theme = st.text_input("主題（例：接發與防守 / 攻擊）", key="s_theme")
+        notes = st.text_area("備註（可選）", key="s_notes", height=90)
 
-        # ========== 1) 先選場次（主流程），不再強迫重複填場次 ==========
-        if sessions.empty:
-            st.info("目前沒有場次。請先建立一個場次。")
-            st.session_state.pop("selected_session_id", None)
-            selected_session_id = None
-        else:
-            # options 用 id，顯示用 format_func（隱藏 id）
-            session_ids = sessions["session_id"].tolist()
-            session_label_map = {
-                int(r.session_id): f"{r.session_date}｜{r.theme}（{int(r.duration_min)}min）"
-                for r in sessions.itertuples(index=False)
-            }
-
-            if "selected_session_id" not in st.session_state:
-                st.session_state["selected_session_id"] = int(session_ids[0])
-
-            # 若 state 中的 id 已不存在，回退到第一筆
-            if st.session_state["selected_session_id"] not in session_label_map:
-                st.session_state["selected_session_id"] = int(session_ids[0])
-
-            default_index = session_ids.index(st.session_state["selected_session_id"])
-
-            selected_session_id = st.selectbox(
-                "選擇場次",
-                options=session_ids,
-                index=default_index,
-                format_func=lambda sid: session_label_map.get(int(sid), str(sid)),
-                key="selected_session_id",
+        if st.button("新增場次", key="s_add"):
+            exec_one(
+                con,
+                "INSERT INTO sessions (session_date, duration_min, theme, notes) VALUES (?, ?, ?, ?);",
+                (session_date.isoformat(), int(duration_min), theme.strip(), notes.strip())
             )
-
-        # ========== 2) 建立新場次（放在 expander；避免一直重填） ==========
-        with st.expander("＋ 建立新場次", expanded=bool(sessions.empty)):
-            st.markdown("#### 新增訓練場次")
-            session_date = st.date_input("日期", key="s_date")
-            duration_min = st.number_input("總時長（分鐘）", min_value=0, value=120, step=5, key="s_dur")
-            theme = st.text_input("主題（例：接發與防守 / 攻擊鏈）", key="s_theme")
-            notes = st.text_area("備註（可選）", key="s_notes", height=90)
-
-            if st.button("新增場次", key="s_add"):
-                _theme = (theme or "").strip()
-                _notes = (notes or "").strip()
-
-                if not _theme:
-                    st.error("主題不可為空。")
-                else:
-                    # 查重：同一天 + 同主題 -> 不重複新增，直接切換到既有場次
-                    existed = fetch_one(
-                        con,
-                        "SELECT session_id FROM sessions WHERE session_date=? AND theme=? LIMIT 1;",
-                        (session_date.isoformat(), _theme),
-                    )
-
-                    if existed:
-                        st.session_state["selected_session_id"] = int(existed[0])
-                        st.info("此日期＋主題的場次已存在，已切換到該場次。")
-                    else:
-                        exec_one(
-                            con,
-                            "INSERT INTO sessions (session_date, duration_min, theme, notes) VALUES (?, ?, ?, ?);",
-                            (session_date.isoformat(), int(duration_min), _theme, _notes),
-                        )
-                        new_id = fetch_one(con, "SELECT last_insert_rowid();")[0]
-                        st.session_state["selected_session_id"] = int(new_id)
-                        st.success("已新增，並已切換到新場次。")
+            st.success("已新增。")
 
         st.markdown("---")
+        st.markdown("#### 將訓練項目加入場次")
 
-        # ========== 3) 將訓練項目加入已選場次（id 全部隱藏） ==========
-        st.markdown("#### 將訓練項目加入場次（session_drills）")
+        sessions = df(con, "SELECT session_id, session_date, theme FROM sessions ORDER BY session_date DESC;")
+        drills = df(con, "SELECT drill_id, drill_name, category FROM drills ORDER BY drill_name;")
 
-        if selected_session_id is None or drills.empty:
+        if sessions.empty or drills.empty:
             st.info("先新增至少一個場次與一個訓練項目。")
         else:
-            drill_ids = drills["drill_id"].tolist()
-            drill_label_map = {int(r.drill_id): r.drill_name for r in drills.itertuples(index=False)}
+            # 下拉不顯示 id：用 options=id + format_func
+            sid_list = sessions["session_id"].astype(int).tolist()
+            sid_map = {int(r.session_id): f"{r.session_date}｜{r.theme}" for r in sessions.itertuples(index=False)}
 
-            selected_drill_id = st.selectbox(
+            did_list = drills["drill_id"].astype(int).tolist()
+            did_map = {int(r.drill_id): f"{r.drill_name}（{r.category}）" for r in drills.itertuples(index=False)}
+
+            session_id = st.selectbox(
+                "選擇場次",
+                options=sid_list,
+                format_func=lambda x: sid_map.get(int(x), ""),
+                key="sd_session"
+            )
+            drill_id = st.selectbox(
                 "選擇訓練項目",
-                options=drill_ids,
-                format_func=lambda did: drill_label_map.get(int(did), str(did)),
-                key="sd_drill_select",
+                options=did_list,
+                format_func=lambda x: did_map.get(int(x), ""),
+                key="sd_drill"
             )
 
-            # 自動給下一個 sequence_no（仍允許手動改）
-            next_seq = fetch_one(
-                con,
-                "SELECT COALESCE(MAX(sequence_no), 0) + 1 FROM session_drills WHERE session_id=?;",
-                (int(selected_session_id),),
-            )[0]
-            sequence_no = st.number_input(
-                "順序（sequence_no）",
-                min_value=1,
-                value=int(next_seq),
-                step=1,
-                key="sd_seq",
-            )
-
+            sequence_no = st.number_input("順序", min_value=1, value=1, step=1, key="sd_seq")
             planned_minutes = st.number_input("預計分鐘（可選）", min_value=0, value=20, step=5, key="sd_min")
             planned_reps = st.number_input("預計次數（可選）", min_value=0, value=50, step=5, key="sd_reps")
 
@@ -349,42 +276,56 @@ with tab3:
                     INSERT OR REPLACE INTO session_drills
                     (session_id, drill_id, sequence_no, planned_minutes, planned_reps)
                     VALUES (?, ?, ?, ?, ?);
-                """, (
-                    int(selected_session_id),
-                    int(selected_drill_id),
-                    int(sequence_no),
-                    int(planned_minutes),
-                    int(planned_reps),
-                ))
+                """, (int(session_id), int(drill_id), int(sequence_no), int(planned_minutes), int(planned_reps)))
                 st.success("已加入/更新。")
 
     with colR:
-        # ========== 右側列表：id 全部隱藏 ==========
-        st.markdown("#### 場次列表")
+        st.markdown("#### 場次列表（全中文 / 不顯示 ID）")
         st.dataframe(
             df(con, """
-                SELECT session_date, duration_min, theme, created_at
+                SELECT
+                    session_date AS 日期,
+                    duration_min AS 總時長(分),
+                    theme        AS 主題,
+                    created_at   AS 建立時間
                 FROM sessions
-                ORDER BY session_date DESC, session_id DESC;
+                ORDER BY session_date DESC;
             """),
             use_container_width=True,
             hide_index=True
         )
 
-        st.markdown("#### 場次-項目（session_drills）")
+        st.markdown("#### 場次－項目（全中文 / 不顯示 ID）")
         st.dataframe(
             df(con, """
-                SELECT s.session_date, s.theme,
-                       sd.sequence_no, d.drill_name,
-                       sd.planned_minutes, sd.planned_reps
+                SELECT
+                    s.session_date AS 日期,
+                    s.theme        AS 場次主題,
+                    sd.sequence_no AS 順序,
+                    CASE
+                        WHEN d.category IN ('攻擊','接發','防守','發球','舉球','攔網','綜合') THEN d.category
+                        WHEN d.category = 'attack_chain' THEN '攻擊'
+                        WHEN d.category = 'serve_receive' THEN '接發'
+                        WHEN d.category = 'defense' THEN '防守'
+                        WHEN d.category = 'serve' THEN '發球'
+                        WHEN d.category IN ('set','setting') THEN '舉球'
+                        WHEN d.category IN ('block','blocking') THEN '攔網'
+                        WHEN d.category IN ('all','mix','mixed','comprehensive','summary') THEN '綜合'
+                        ELSE COALESCE(d.category, '')
+                    END AS 類別,
+                    d.drill_name      AS 訓練項目,
+                    sd.planned_minutes AS 預計分鐘,
+                    sd.planned_reps    AS 預計次數
                 FROM session_drills sd
                 JOIN sessions s ON s.session_id = sd.session_id
-                JOIN drills d ON d.drill_id = sd.drill_id
+                JOIN drills   d ON d.drill_id   = sd.drill_id
                 ORDER BY s.session_date DESC, sd.sequence_no ASC;
             """),
             use_container_width=True,
             hide_index=True
         )
+
+
 
 # ---- Tab 4: Results ----
 with tab4:
