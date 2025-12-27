@@ -89,7 +89,7 @@ with tab1:
         st.markdown("#### 新增球員")
         name = st.text_input("姓名", key="p_name")
         POS_OPTIONS = ["（不填）", "主攻", "副攻", "攔中", "舉球", "自由"]
-        pos_sel = st.selectbox("位置", POS_OPTIONS, index=0, key="p_pos_sel")
+        pos_sel = st.selectbox("位置（可選）", POS_OPTIONS, index=0, key="p_pos_sel")
         position = "" if pos_sel == "（不填）" else pos_sel
 
         grade_year = st.text_input("年級（例：大一/大二）", key="p_grade")
