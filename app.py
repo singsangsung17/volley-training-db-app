@@ -88,14 +88,17 @@ with tab1:
     with colL:
         st.markdown("#### 新增球員")
         name = st.text_input("姓名", key="p_name")
-        position = st.text_input("位置（例：主攻/舉球/自由/副攻/攔中）", key="p_pos")
+        POS_OPTIONS = ["（不填）", "主攻", "副攻", "攔中", "舉球", "自由"]
+        pos_sel = st.selectbox("位置", POS_OPTIONS, index=0, key="p_pos_sel")
+        position = "" if pos_sel == "（不填）" else pos_sel
+
         grade_year = st.text_input("年級（例：大一/大二）", key="p_grade")
         if st.button("新增球員", key="p_add"):
             if not name.strip():
                 st.error("姓名必填。")
             else:
                 exec_one(con, "INSERT INTO players (name, position, grade_year) VALUES (?, ?, ?);",
-                         (name.strip(), position.strip(), grade_year.strip()))
+                         (name.strip(), position, grade_year.strip()))
                 st.success("已新增。")
     with colR:
         st.markdown("#### 球員列表")
