@@ -343,7 +343,8 @@ with tab4:
             # ✅ 成功率即時顯示（填完立刻看得懂）
             if total_count and total_count > 0:
                 rate = success_count / total_count
-                st.metric("成功率", f"{rate:.0%}", help=f"{success_count}/{total_count}")
+                st.metric("成功率", f"{rate:.1%}", help=f"{success_count}/{total_count}")
+
             else:
                 st.caption("成功率：—（請先填總次數 > 0）")
 
@@ -436,8 +437,9 @@ with tab4:
                 r.total_count,
                 CASE
                     WHEN r.total_count=0 THEN NULL
-                    ELSE ROUND(1.0*r.success_count/r.total_count, 3)
+                    ELSE printf('%.1f%%', 100.0*r.success_count/r.total_count)
                 END AS success_rate,
+
                 r.error_type AS main_target,
                 CASE
                     WHEN r.notes LIKE '[次要修正目標] %' THEN
