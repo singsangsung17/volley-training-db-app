@@ -126,7 +126,6 @@ with tab1:
     hide_index=True,
 )
 
-                     use_container_width=True, hide_index=True)
 
 # ---- Tab 2: Drills ----
 with tab2:
