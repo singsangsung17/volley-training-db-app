@@ -293,5 +293,3 @@ with tab5:
             ORDER BY error_events DESC;
         """), use_container_width=True, hide_index=True)
 
-st.markdown("---")
-st.caption("提示：你可以把這個 App 跑起來後截圖（新增資料畫面 + 分析畫面），放進書審當『作品可運行證據』。")
