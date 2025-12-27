@@ -1,0 +1,10 @@
+# venv
+.venv/
+venv/
+
+# sqlite db
+*.db
+
+# python cache
+__pycache__/
+*.pyc
