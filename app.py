@@ -136,7 +136,7 @@ with tab2:
                 )
                 st.success("已新增。")
 
-   with colR:
+ with colR:
     st.markdown("#### 訓練項目列表（不顯示 id / 難度置前 / 類別中文）")
 
     st.dataframe(
