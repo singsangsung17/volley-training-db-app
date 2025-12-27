@@ -158,7 +158,7 @@ with tab3:
             # options 用 id，顯示用 format_func（隱藏 id）
             session_ids = sessions["session_id"].tolist()
             session_label_map = {
-                int(r.session_id): f"{r.session_date}｜{r.theme}（{int(r.duration_min)} 分）"
+                int(r.session_id): f"{r.session_date}｜{r.theme}（{int(r.duration_min)}min）"
                 for r in sessions.itertuples(index=False)
             }
 
