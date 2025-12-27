@@ -678,93 +678,125 @@ with tab5:
     st.markdown("#### 分析（對應附錄 SQL 範例）")
     colA, colB = st.columns(2)
 
+    # ===== 左欄：1 + 3 =====
     with colA:
-        st.markdown("**1｜近 4 週每位球員訓練量**")
-       st.dataframe(df(con, """
-    SELECT
-      p.name AS 球員,
-      COUNT(DISTINCT r.session_id) AS 近四週場次數,
-      SUM(r.total_count) AS 近四週總動作數
-    FROM drill_results r
-    JOIN players p ON p.player_id = r.player_id
-    JOIN sessions s ON s.session_id = r.session_id
-    WHERE s.session_date >= date('now','-28 day')
-    GROUP BY p.name
-    ORDER BY 近四週總動作數 DESC;
-"""), use_container_width=True, hide_index=True)
+        st.markdown("**1) 近 4 週每位球員訓練量**")
+        st.dataframe(
+            df(con, """
+                SELECT
+                    p.name AS 球員,
+                    COUNT(DISTINCT r.session_id) AS 近四週場次數,
+                    SUM(r.total_count) AS 近四週總動作數
+                FROM drill_results r
+                JOIN players p ON p.player_id = r.player_id
+                JOIN sessions s ON s.session_id = r.session_id
+                WHERE s.session_date >= date('now','-28 day')
+                GROUP BY p.name
+                ORDER BY 近四週總動作數 DESC;
+            """),
+            use_container_width=True,
+            hide_index=True
+        )
 
-        st.markdown("**3｜指定球員 × 指定 drill 的週別進步趨勢**")
-       players = df(con, "SELECT player_id, name FROM players ORDER BY name;")
-drills  = df(con, "SELECT drill_id, drill_name FROM drills ORDER BY drill_name;")
+        st.markdown("**3) 指定球員 × 指定訓練項目的週別進步趨勢**")
 
-pid_list = players["player_id"].astype(int).tolist()
-pid_map  = {int(r.player_id): r.name for r in players.itertuples(index=False)}
+        players = df(con, "SELECT player_id, name FROM players ORDER BY name;")
+        drills = df(con, "SELECT drill_id, drill_name FROM drills ORDER BY drill_name;")
 
-did_list = drills["drill_id"].astype(int).tolist()
-did_map  = {int(r.drill_id): r.drill_name for r in drills.itertuples(index=False)}
+        pid_list = players["player_id"].astype(int).tolist()
+        pid_map = {int(r.player_id): r.name for r in players.itertuples(index=False)}
 
-pid = st.selectbox("選擇球員", options=pid_list, format_func=lambda x: pid_map.get(int(x), ""), key="a_pid")
-did = st.selectbox("選擇訓練項目", options=did_list, format_func=lambda x: did_map.get(int(x), ""), key="a_did")
+        did_list = drills["drill_id"].astype(int).tolist()
+        did_map = {int(r.drill_id): r.drill_name for r in drills.itertuples(index=False)}
 
-trend = df(con, """
-    SELECT
-      strftime('%Y-%W', s.session_date) AS 週別,
-      ROUND(1.0 * SUM(r.success_count) / NULLIF(SUM(r.total_count), 0), 3) AS 成功率,
-      SUM(r.total_count) AS 總動作數
-    FROM drill_results r
-    JOIN sessions s ON s.session_id = r.session_id
-    WHERE r.player_id = ?
-      AND r.drill_id = ?
-    GROUP BY strftime('%Y-%W', s.session_date)
-    ORDER BY 週別 ASC;
-""", (int(pid), int(did)))
-st.dataframe(trend, use_container_width=True, hide_index=True)
+        pid = st.selectbox(
+            "選擇球員",
+            options=pid_list,
+            format_func=lambda x: pid_map.get(int(x), ""),
+            key="a_pid"
+        )
+        did = st.selectbox(
+            "選擇訓練項目",
+            options=did_list,
+            format_func=lambda x: did_map.get(int(x), ""),
+            key="a_did"
+        )
 
+        trend = df(con, """
+            SELECT
+                strftime('%Y-%W', s.session_date) AS 週別,
+                printf('%.1f%%', 100.0 * SUM(r.success_count) / NULLIF(SUM(r.total_count), 0)) AS 成功率,
+                SUM(r.total_count) AS 總動作數
+            FROM drill_results r
+            JOIN sessions s ON s.session_id = r.session_id
+            WHERE r.player_id = ?
+              AND r.drill_id = ?
+            GROUP BY strftime('%Y-%W', s.session_date)
+            ORDER BY 週別 ASC;
+        """, (int(pid), int(did)))
+
+        st.dataframe(trend, use_container_width=True, hide_index=True)
+
+    # ===== 右欄：2 + 4 + 5 =====
     with colB:
-        st.markdown("**2｜成功率最低的訓練項目（最低→最高）**")
-        st.dataframe(df(con, """
-    SELECT
-      d.drill_name AS 訓練項目,
-      CASE
-        WHEN d.category IN ('攻擊','接發','防守','發球','舉球','攔網','綜合') THEN d.category
-        WHEN d.category = 'attack_chain' THEN '攻擊'
-        WHEN d.category = 'serve_receive' THEN '接發'
-        WHEN d.category = 'defense' THEN '防守'
-        WHEN d.category = 'serve' THEN '發球'
-        WHEN d.category IN ('set','setting') THEN '舉球'
-        WHEN d.category IN ('block','blocking') THEN '攔網'
-        WHEN d.category IN ('all','mix','mixed','comprehensive') THEN '綜合'
-        ELSE COALESCE(d.category, '')
-      END AS 類別,
-      ROUND(1.0 * SUM(r.success_count) / NULLIF(SUM(r.total_count), 0), 3) AS 成功率,
-      SUM(r.total_count) AS 總動作數
-    FROM drill_results r
-    JOIN drills d ON d.drill_id = r.drill_id
-    GROUP BY d.drill_name, 類別
-    HAVING SUM(r.total_count) >= 30
-    ORDER BY 成功率 ASC;
-"""), use_container_width=True, hide_index=True)
+        st.markdown("**2) 成功率最低的訓練項目（至少 30 次）**")
+        st.dataframe(
+            df(con, """
+                SELECT
+                    d.drill_name AS 訓練項目,
+                    CASE
+                        WHEN d.category IN ('攻擊','接發','防守','發球','舉球','攔網','綜合') THEN d.category
+                        WHEN d.category = 'attack_chain' THEN '攻擊'
+                        WHEN d.category = 'serve_receive' THEN '接發'
+                        WHEN d.category = 'defense' THEN '防守'
+                        WHEN d.category = 'serve' THEN '發球'
+                        WHEN d.category IN ('set','setting') THEN '舉球'
+                        WHEN d.category IN ('block','blocking') THEN '攔網'
+                        WHEN d.category IN ('all','mix','mixed','comprehensive','summary') THEN '綜合'
+                        ELSE COALESCE(d.category, '')
+                    END AS 類別,
+                    printf('%.1f%%', 100.0 * SUM(r.success_count) / NULLIF(SUM(r.total_count), 0)) AS 成功率,
+                    SUM(r.total_count) AS 總動作數
+                FROM drill_results r
+                JOIN drills d ON d.drill_id = r.drill_id
+                GROUP BY d.drill_name, 類別
+                HAVING SUM(r.total_count) >= 30
+                ORDER BY 100.0 * SUM(r.success_count) / NULLIF(SUM(r.total_count), 0) ASC;
+            """),
+            use_container_width=True,
+            hide_index=True
+        )
 
-        st.markdown("**4｜依訓練主題（theme）統計整體表現**")
-       st.dataframe(df(con, """
-    SELECT
-      s.theme AS 主題,
-      COUNT(DISTINCT s.session_id) AS 場次數,
-      ROUND(1.0 * SUM(r.success_count) / NULLIF(SUM(r.total_count), 0), 3) AS 整體成功率
-    FROM sessions s
-    JOIN drill_results r ON r.session_id = s.session_id
-    GROUP BY s.theme
-    ORDER BY 場次數 DESC;
-"""), use_container_width=True, hide_index=True)
+        st.markdown("**4) 依訓練主題（主題）統計整體表現**")
+        st.dataframe(
+            df(con, """
+                SELECT
+                    s.theme AS 主題,
+                    COUNT(DISTINCT s.session_id) AS 場次數,
+                    printf('%.1f%%', 100.0 * SUM(r.success_count) / NULLIF(SUM(r.total_count), 0)) AS 整體成功率,
+                    SUM(r.total_count) AS 總動作數
+                FROM sessions s
+                JOIN drill_results r ON r.session_id = s.session_id
+                GROUP BY s.theme
+                ORDER BY 場次數 DESC;
+            """),
+            use_container_width=True,
+            hide_index=True
+        )
+
+        st.markdown("**5) 失誤類型排行榜**")
+        st.dataframe(
+            df(con, """
+                SELECT
+                    COALESCE(NULLIF(TRIM(r.error_type), ''), '（未填）') AS 失誤類型,
+                    COUNT(*) AS 次數
+                FROM drill_results r
+                GROUP BY COALESCE(NULLIF(TRIM(r.error_type), ''), '（未填）')
+                ORDER BY 次數 DESC;
+            """),
+            use_container_width=True,
+            hide_index=True
+        )
 
 
-        st.markdown("**5｜失誤類型排行榜**")
-        st.dataframe(df(con, """
-    SELECT
-      COALESCE(NULLIF(TRIM(r.error_type),''), '(未填)') AS 失誤類型,
-      COUNT(*) AS 次數
-    FROM drill_results r
-    GROUP BY COALESCE(NULLIF(TRIM(r.error_type),''), '(未填)')
-    ORDER BY 次數 DESC;
-"""), use_container_width=True, hide_index=True)
-
+ 
