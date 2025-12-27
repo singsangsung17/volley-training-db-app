@@ -1,4 +1,3 @@
-
 PRAGMA foreign_keys = ON;
 
 -- Seed players
@@ -7,7 +6,7 @@ INSERT INTO players (name, position, grade_year) VALUES
 ('B 球員','舉球','大二'),
 ('C 球員','自由','大一'),
 ('D 球員','副攻','大三'),
-('E 球員',攔中','大一'),
+('E 球員','攔中','大一'),
 ('F 球員','主攻','大一');
 
 -- Seed drills
@@ -15,15 +14,15 @@ INSERT INTO drills (drill_name, objective, category, difficulty) VALUES
 ('接發到位訓練','提升接發到位率','serve_receive',3),
 ('防守落點反應','提升防守反應與移動','defense',4),
 ('攻擊鏈串連','提升一傳→舉球→攻擊連貫','attack_chain',4),
-('發球穩定度','降低發球失誤','serve',2);
+('發球穩定度','降低發球失誤、提升壓迫性','serve',3);
 
 -- Seed sessions
 INSERT INTO sessions (session_date, duration_min, theme, notes) VALUES
-(date('now','-14 day'), 120, '接發與防守', '週中基礎強化'),
-(date('now','-7 day'),  120, '攻擊鏈',     '攻擊節奏與配合'),
-(date('now'),          120, '整合回合',     '串連與情境演練');
+('2025-12-01', 90, '接發與防守', '以接發到位與防守反應為主'),
+('2025-12-08', 95, '攻擊鏈串連', '提升攻擊鏈連貫與發球壓迫'),
+('2025-12-15', 85, '綜合訓練', '綜合強化與小對抗');
 
--- Link session drills (sequence_no)
+-- Map drills into sessions
 INSERT INTO session_drills (session_id, drill_id, sequence_no, planned_minutes, planned_reps) VALUES
 (1, 1, 1, 25, 60),
 (1, 2, 2, 30, 50),
@@ -37,21 +36,17 @@ INSERT INTO session_drills (session_id, drill_id, sequence_no, planned_minutes, 
 (3, 3, 2, 35, 70),
 (3, 4, 3, 15, 30);
 
--- Seed some results (session_id, drill_id, player_id, success_count, total_count, error_type)
+-- Seed some results (session_id, drill_id, player_id, success_count, total_count, error_type, notes)
 INSERT INTO drill_results (session_id, drill_id, player_id, success_count, total_count, error_type, notes) VALUES
-(1, 1, 1, 42, 60, '接球不到位', '一傳偏飄'),
-(1, 1, 2, 50, 60, '判斷慢',     ''),
-(1, 1, 3, 55, 60, '',           '穩定'),
+(1, 1, 1, 48, 60, '接發不到位', '需提升穩定度'),
+(1, 1, 2, 50, 60, '',           '穩定'),
 (1, 2, 1, 30, 50, '腳步不到位', ''),
-(1, 2, 3, 38, 50, '判斷慢',     ''),
-(1, 4, 2, 34, 40, '發球失誤',   ''),
+(1, 2, 3, 35, 50, '判斷慢',     ''),
 
-(2, 3, 1, 40, 60, '揮臂時機',   ''),
-(2, 3, 2, 45, 60, '托球高度',   ''),
-(2, 3, 4, 35, 60, '起跳節奏',   ''),
-(2, 4, 5, 22, 30, '發球失誤',   ''),
+(2, 3, 1, 40, 60, '攻擊點選擇', ''),
+(2, 3, 2, 45, 60, '',           '配合佳'),
+(2, 4, 4, 24, 30, '發球失誤',   ''),
 
-(3, 3, 1, 48, 70, '揮臂時機',   ''),
-(3, 3, 2, 52, 70, '托球高度',   ''),
-(3, 2, 3, 40, 50, '判斷慢',     ''),
+(3, 2, 1, 32, 50, '腳步不到位', ''),
+(3, 3, 2, 50, 70, '舉球高度',   ''),
 (3, 4, 4, 26, 30, '發球失誤',   '');
