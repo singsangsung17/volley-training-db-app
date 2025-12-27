@@ -178,31 +178,116 @@ with tab3:
             ORDER BY s.session_date DESC, sd.sequence_no ASC;
         """), use_container_width=True, hide_index=True)
 
-# --- Tab 4: Results ---
+# ---- Tab 4: Results ----
 with tab4:
     st.markdown("#### 新增成效記錄（drill_results）")
 
-    # 只改這三行：players 多抓 grade_year，並維持你的排序習慣即可
     sessions = df(con, "SELECT session_id, session_date, duration_min, theme FROM sessions ORDER BY session_date DESC;")
-    drills   = df(con, "SELECT drill_id, drill_name FROM drills ORDER BY drill_name;")
     players  = df(con, "SELECT player_id, name, position, grade_year FROM players ORDER BY name;")
 
-    if sessions.empty or drills.empty or players.empty:
-        st.info("先新增場次、訓練項目、球員。")
-    else:
-        # ✅ S3：用 form 包起來，按下按鈕才提交
-        with st.form("add_drill_result_form", clear_on_submit=False):
-            c1, c2, c3, c4 = st.columns([1.2, 1.2, 1.2, 1])
+    # 確保有「本場次總結」這個 drill（因為 drill_results.drill_id 是 NOT NULL）
+    summary_row = df(con, "SELECT drill_id FROM drills WHERE drill_name = '本場次總結' LIMIT 1;")
+    if summary_row.empty:
+        exec_one(
+            con,
+            "INSERT INTO drills (drill_name, objective, category, difficulty) VALUES (?, ?, ?, ?);",
+            ("本場次總結", "場次/個人修正目標與觀察", "summary", 1),
+        )
+        summary_row = df(con, "SELECT drill_id FROM drills WHERE drill_name = '本場次總結' LIMIT 1;")
+    summary_drill_id = int(summary_row.iloc[0]["drill_id"])
 
-            # ---------- c1: 場次（不顯示 id；顯示 12/15 綜合訓練（85min）） ----------
+    # --- 常見問題字典：依 drills.category 連動 ---
+    TARGETS_BY_CATEGORY = {
+        "attack_chain": [
+            "攻擊點選擇", "助跑節奏", "起跳時機", "擊球點太低/太後", "線路控制不穩",
+            "手腕控制/出手不穩", "與舉球配合", "舉球高度/位置不穩", "攻防轉換慢",
+        ],
+        "serve_receive": [
+            "接發不到位", "接發平台角度不穩", "腳步不到位", "落點判斷慢",
+            "起手晚/手型不穩", "重心不穩", "溝通喊聲不足",
+        ],
+        "defense": [
+            "防守判斷慢", "移動腳步不到位", "手型/面向不對", "補位站位錯",
+            "防守後續處理慢", "反應慢",
+        ],
+        "serve": [
+            "發球失誤", "落點不準", "拋球不穩", "節奏不穩",
+            "力量/旋轉不足", "壓迫性不足",
+        ],
+        "summary": [
+            "專注度/失誤率高", "溝通不足", "站位/輪轉錯", "節奏感不穩", "體能不足",
+        ],
+        "other": [
+            "專注度/失誤率高", "溝通不足", "站位/輪轉錯", "節奏感不穩", "體能不足",
+        ],
+        "": [
+            "專注度/失誤率高", "溝通不足", "站位/輪轉錯", "節奏感不穩", "體能不足",
+        ],
+    }
+
+    def _infer_categories_for_session(sess_id: int) -> list[str]:
+        # 以該場次安排過的 drills.category 為主；若該場次未安排 drills，fallback 到 theme 關鍵字推測
+        cats = df(
+            con,
+            """
+            SELECT DISTINCT COALESCE(NULLIF(TRIM(d.category), ''), 'other') AS category
+            FROM session_drills sd
+            JOIN drills d ON d.drill_id = sd.drill_id
+            WHERE sd.session_id = ?
+            """,
+            (int(sess_id),),
+        )
+        if not cats.empty:
+            return [str(x).strip() for x in cats["category"].tolist() if str(x).strip()]
+
+        # fallback：看 theme 關鍵字
+        row = df(con, "SELECT theme FROM sessions WHERE session_id = ? LIMIT 1;", (int(sess_id),))
+        theme = "" if row.empty else (row.iloc[0]["theme"] or "")
+        t = str(theme)
+
+        guessed = []
+        if "攻擊" in t:
+            guessed.append("attack_chain")
+        if "接發" in t or "一傳" in t:
+            guessed.append("serve_receive")
+        if "防守" in t:
+            guessed.append("defense")
+        if "發球" in t:
+            guessed.append("serve")
+        if "綜合" in t or not guessed:
+            guessed.append("summary")
+        return guessed
+
+    def _build_target_options(categories: list[str]) -> list[str]:
+        # 合併多個 category 的清單，去重但保留順序
+        merged = []
+        seen = set()
+        for c in categories:
+            for item in TARGETS_BY_CATEGORY.get(c, TARGETS_BY_CATEGORY["summary"]):
+                if item not in seen:
+                    merged.append(item)
+                    seen.add(item)
+        # 再加上通用項
+        for item in TARGETS_BY_CATEGORY["summary"]:
+            if item not in seen:
+                merged.append(item)
+                seen.add(item)
+        # 最後加上「無/其他」
+        return ["無（僅紀錄）"] + merged + ["其他（自行輸入）"]
+
+    if sessions.empty or players.empty:
+        st.info("先新增場次、球員。")
+    else:
+        with st.form("add_result_targets_form", clear_on_submit=False):
+            c1, c2, c3 = st.columns([1.4, 1.3, 1.3])
+
+            # ---------- c1: 場次（12/15 綜合訓練（85min）） ----------
             with c1:
                 def _session_label(r):
                     s = (r.session_date or "").strip()
                     mmdd = s[5:7] + "/" + s[8:10] if len(s) >= 10 else s
-
                     theme = (getattr(r, "theme", "") or "").strip()
                     dur = getattr(r, "duration_min", None)
-
                     dur_txt = f"（{int(dur)}min）" if dur is not None and str(dur).strip() != "" else ""
                     return f"{mmdd} {theme}{dur_txt}".strip() if theme else f"{mmdd}{dur_txt}".strip()
 
@@ -214,58 +299,12 @@ with tab4:
                     key="r_session",
                 )
 
-            # ✅ S1：drills 依照場次過濾（只顯示 session_drills 裡的 drill）
-            drills_in_session = df(
-                con,
-                """
-                SELECT
-                    sd.drill_id,
-                    d.drill_name,
-                    sd.sequence_no,
-                    sd.planned_minutes,
-                    sd.planned_reps
-                FROM session_drills sd
-                JOIN drills d ON d.drill_id = sd.drill_id
-                WHERE sd.session_id = ?
-                ORDER BY sd.sequence_no, d.drill_name;
-                """,
-                params=(int(session_id),),
-            )
-
-            # ---------- c2: 訓練項目（依場次過濾；不顯示 id） ----------
+            # ---------- c2: 球員（A 球員（主攻｜大二）） ----------
             with c2:
-                if drills_in_session.empty:
-                    st.warning("這個場次尚未設定訓練項目（session_drills）。請先到 sessions/對應頁面把 drills 排進去。")
-                    drill_id = None
-                else:
-                    def _drill_label(r):
-                        name = (r.drill_name or "").strip()
-                        # 這裡不改資料流程，只是顯示更友善（不喜歡可改回只顯示 name）
-                        pm = r.planned_minutes
-                        pr = r.planned_reps
-                        extra = []
-                        if pm is not None and str(pm).strip() != "":
-                            extra.append(f"{int(pm)}min")
-                        if pr is not None and str(pr).strip() != "":
-                            extra.append(f"{int(pr)}次")
-                        extra_txt = f"（{'／'.join(extra)}）" if extra else ""
-                        return f"{name}{extra_txt}"
-
-                    drill_map = {int(r.drill_id): _drill_label(r) for r in drills_in_session.itertuples(index=False)}
-                    drill_id = st.selectbox(
-                        "訓練項目",
-                        options=list(drill_map.keys()),
-                        format_func=lambda did: drill_map[did],
-                        key="r_drill",
-                    )
-
-            # ---------- c3: 球員（A 球員（主攻｜大二）） ----------
-            with c3:
                 def _player_label(r):
                     name = (r.name or "").strip()
                     pos = (r.position or "").strip()
                     grade = (getattr(r, "grade_year", "") or "").strip()
-
                     if pos and grade:
                         return f"{name}（{pos}｜{grade}）"
                     elif pos:
@@ -283,50 +322,100 @@ with tab4:
                     key="r_player",
                 )
 
-            # ---------- c4: 原本流程（先保留 text_input；S級不要求改成選單） ----------
-            with c4:
-                error_type = st.text_input("失誤類型（可選）", key="r_err")
+            # ---------- c3: 主要修正目標（依場次連動） ----------
+            with c3:
+                cats = _infer_categories_for_session(int(session_id))
+                primary_options = _build_target_options(cats)
 
-            # 其他欄位（照你原本習慣）
-            success_count = st.number_input("成功次數", min_value=0, value=0, step=1, key="r_success")
-            total_count   = st.number_input("總次數",   min_value=0, value=0, step=1, key="r_total")
-            notes         = st.text_area("備註（可選）", height=80, key="r_notes")
+                primary_choice = st.selectbox("主要修正目標（可選）", options=primary_options, key="r_primary")
+
+                primary_other = ""
+                if primary_choice == "其他（自行輸入）":
+                    primary_other = st.text_input("主要修正目標：其他（請輸入）", key="r_primary_other")
+
+            # --- 量化欄位（維持原流程） ---
+            success_count = st.number_input("成功次數（可選）", min_value=0, value=0, step=1, key="r_success")
+            total_count   = st.number_input("總次數（可選）",   min_value=0, value=0, step=1, key="r_total")
+
+            # ✅ 你要求：次要修正目標放在「總次數之下、備註之上」
+            cats2 = _infer_categories_for_session(int(session_id))
+            secondary_base = _build_target_options(cats2)
+
+            # 次要不需要「無（僅紀錄）」；另外避免把「其他」當一般值
+            secondary_options = [x for x in secondary_base if x not in ("無（僅紀錄）")]
+            secondary_sel = st.multiselect(
+                "次要修正目標（可複選｜可選）",
+                options=secondary_options,
+                default=[],
+                key="r_secondary",
+            )
+
+            secondary_other = ""
+            if "其他（自行輸入）" in secondary_sel:
+                secondary_other = st.text_input("次要修正目標：其他（可用逗號或頓號分隔）", key="r_secondary_other")
+
+            notes = st.text_area("備註（可選）", height=90, key="r_notes")
 
             submitted = st.form_submit_button("新增成效記錄")
 
             if submitted:
-                # ✅ S2：驗證（阻止不合理資料）
-                if drill_id is None:
-                    st.error("此場次沒有可選的訓練項目，請先設定 session_drills。")
-                elif total_count <= 0:
-                    st.error("總次數必須大於 0。")
-                elif success_count > total_count:
+                # 防呆：成功不得大於總次數（若總次數=0，代表你只想記質性觀察，也允許）
+                if total_count > 0 and success_count > total_count:
                     st.error("成功次數不能大於總次數。")
                 else:
-                    con.execute(
+                    # 主目標決定：無/空 -> 存空字串；其他 -> 用輸入
+                    if primary_choice == "無（僅紀錄）":
+                        main_target = ""
+                    elif primary_choice == "其他（自行輸入）":
+                        main_target = (primary_other or "").strip()
+                    else:
+                        main_target = (primary_choice or "").strip()
+
+                    # 次目標整理：去掉「其他」占位，並加上自由輸入拆分
+                    sec_targets = [x for x in secondary_sel if x != "其他（自行輸入）"]
+                    if secondary_other.strip():
+                        raw = secondary_other.replace("，", ",").replace("、", ",")
+                        sec_targets += [t.strip() for t in raw.split(",") if t.strip()]
+
+                    # 將次要目標寫進 notes 第一行前綴（不改 schema）
+                    sec_prefix = ""
+                    if sec_targets:
+                        # 去重但保留順序
+                        seen = set()
+                        uniq = []
+                        for t in sec_targets:
+                            if t not in seen:
+                                uniq.append(t)
+                                seen.add(t)
+                        sec_prefix = f"[次要修正目標] {'、'.join(uniq)}"
+
+                    final_notes = (notes or "").strip()
+                    if sec_prefix:
+                        final_notes = sec_prefix if not final_notes else (sec_prefix + "\n" + final_notes)
+
+                    exec_one(
+                        con,
                         """
                         INSERT INTO drill_results
-                            (session_id, drill_id, player_id, success_count, total_count, error_type, notes)
-                        VALUES
-                            (?, ?, ?, ?, ?, ?, ?);
+                        (session_id, drill_id, player_id, success_count, total_count, error_type, notes)
+                        VALUES (?, ?, ?, ?, ?, ?, ?);
                         """,
                         (
                             int(session_id),
-                            int(drill_id),
+                            int(summary_drill_id),
                             int(player_id),
                             int(success_count),
                             int(total_count),
-                            (error_type or "").strip(),
-                            (notes or "").strip(),
+                            main_target,
+                            final_notes,
                         ),
                     )
-                    con.commit()
                     st.success("已新增。")
                     st.rerun()
 
-    # ✅ 成效範例列表：完整恢復（請務必放在 if/else 外面，避免被吃掉）
     st.markdown("---")
-    st.markdown("#### 成效記錄列表（drill_results）")
+    st.markdown("#### 成效記錄列表（最近 200 筆）")
+
     st.dataframe(
         df(
             con,
@@ -342,20 +431,33 @@ with tab4:
                 r.success_count,
                 r.total_count,
                 CASE
-                    WHEN r.total_count > 0 THEN ROUND(1.0 * r.success_count / r.total_count, 3)
-                    ELSE NULL
+                    WHEN r.total_count=0 THEN NULL
+                    ELSE ROUND(1.0*r.success_count/r.total_count, 3)
                 END AS success_rate,
-                r.error_type,
+                r.error_type AS main_target,
+                CASE
+                    WHEN r.notes LIKE '[次要修正目標] %' THEN
+                        CASE
+                            WHEN instr(r.notes, char(10)) > 0 THEN
+                                substr(r.notes, length('[次要修正目標] ') + 1,
+                                       instr(r.notes, char(10)) - (length('[次要修正目標] ') + 1))
+                            ELSE
+                                substr(r.notes, length('[次要修正目標] ') + 1)
+                        END
+                    ELSE NULL
+                END AS secondary_targets,
                 r.recorded_at,
                 r.notes
             FROM drill_results r
             JOIN sessions s ON s.session_id = r.session_id
             JOIN drills   d ON d.drill_id   = r.drill_id
             JOIN players  p ON p.player_id  = r.player_id
-            ORDER BY r.recorded_at DESC, r.result_id DESC;
+            ORDER BY r.recorded_at DESC
+            LIMIT 200;
             """,
         ),
         use_container_width=True,
+        hide_index=True,
     )
 
 
