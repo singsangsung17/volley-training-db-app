@@ -193,27 +193,29 @@ with tab4:
         c1, c2, c3, c4 = st.columns([1.2, 1.2, 1.2, 1])
 
         # ---------- c1: 場次（不顯示 id） ----------
-        with c1:
-           def _session_label(r):
-               # session_date: 'YYYY-MM-DD' -> 'MM/DD'
-               s = (r.session_date or "").strip()
-               mmdd = s[5:7] + "/" + s[8:10] if len(s) >= 10 else s
+      with c1:
+    def _session_label(r):
+        # session_date: 'YYYY-MM-DD' -> 'MM/DD'
+        s = (r.session_date or "").strip()
+        mmdd = s[5:7] + "/" + s[8:10] if len(s) >= 10 else s
 
-               theme = (r.theme or "").strip()
-               dur = r.duration_min
+        theme = (getattr(r, "theme", "") or "").strip()
 
-               dur_txt = f"（{int(dur)}min）" if dur is not None and str(dur) != "" else ""
-               return f"{mmdd} {theme}{dur_txt}".strip() if theme else f"{mmdd}{dur_txt}".strip()
+        # 兼容：如果 sessions 查詢沒帶 duration_min，也不會炸
+        dur = getattr(r, "duration_min", None)
+        dur_txt = f"（{int(dur)}min）" if dur not in (None, "") else ""
 
+        return f"{mmdd} {theme}{dur_txt}".strip() if theme else f"{mmdd}{dur_txt}".strip()
 
-            session_map = {int(r.session_id): _session_label(r) for r in sessions.itertuples(index=False)}
+    session_map = {int(r.session_id): _session_label(r) for r in sessions.itertuples(index=False)}
 
-            session_id = st.selectbox(
-                "場次",
-                options=list(session_map.keys()),
-                format_func=lambda sid: session_map[sid],
-                key="r_session",
-            )
+    session_id = st.selectbox(
+        "場次",
+        options=list(session_map.keys()),
+        format_func=lambda sid: session_map[sid],
+        key="r_session",
+    )
+
 
         # ---------- c2: 訓練項目（不顯示 id） ----------
         with c2:
