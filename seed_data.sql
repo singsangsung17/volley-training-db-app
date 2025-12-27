@@ -7,7 +7,8 @@ INSERT INTO players (name, position, grade_year) VALUES
 ('B 球員','舉球','大二'),
 ('C 球員','自由','大一'),
 ('D 球員','副攻','大三'),
-('E 球員','主攻','大一');
+('E 球員',攔中','大一'),
+('F 球員','主攻','大一');
 
 -- Seed drills
 INSERT INTO drills (drill_name, objective, category, difficulty) VALUES
