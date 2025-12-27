@@ -338,6 +338,13 @@ with tab4:
             success_count = st.number_input("成功次數（可選）", min_value=0, value=0, step=1, key="t4_success")
             total_count   = st.number_input("總次數（可選）",   min_value=0, value=0, step=1, key="t4_total")
 
+            # ✅ 成功率即時顯示（填完立刻看得懂）
+            if total_count and total_count > 0:
+                rate = success_count / total_count
+                st.metric("成功率", f"{rate:.0%}", help=f"{success_count}/{total_count}")
+            else:
+                st.caption("成功率：—（請先填總次數 > 0）")
+
             # 次要修正目標：放在總次數之下、備註之上（照你要求）
             secondary_sel = st.multiselect(
                 "次要修正目標（可複選｜可選）",
