@@ -349,7 +349,7 @@ with tab4:
 
             # 次要修正目標：放在總次數之下、備註之上（照你要求）
             secondary_sel = st.multiselect(
-                "次要修正目標（可複選｜可選）",
+                "次要修正目標（可複選）",
                 options=secondary_options,
                 default=[],
                 key="t4_secondary",
