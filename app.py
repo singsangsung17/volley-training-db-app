@@ -136,13 +136,33 @@ with tab2:
                 )
                 st.success("已新增。")
 
-    with colR:
-        st.markdown("#### 訓練項目列表")
-        st.dataframe(
-            df(con, "SELECT drill_id, drill_name, category, difficulty, created_at FROM drills ORDER BY drill_id DESC;"),
-            use_container_width=True,
-            hide_index=True
-        )
+   with colR:
+    st.markdown("#### 訓練項目列表（不顯示 id / 難度置前 / 類別中文）")
+
+    st.dataframe(
+        df(con, """
+            SELECT
+                difficulty AS 難度,
+                drill_name AS 訓練項目,
+                CASE
+                    WHEN category IN ('攻擊','接發','防守','發球','舉球','攔網','綜合') THEN category
+                    WHEN category = 'attack_chain' THEN '攻擊'
+                    WHEN category = 'serve_receive' THEN '接發'
+                    WHEN category = 'defense' THEN '防守'
+                    WHEN category = 'serve' THEN '發球'
+                    WHEN category IN ('set','setting') THEN '舉球'
+                    WHEN category IN ('block','blocking') THEN '攔網'
+                    WHEN category IN ('all','mix','mixed','comprehensive') THEN '綜合'
+                    ELSE COALESCE(category, '')
+                END AS 類別,
+                created_at AS 建立時間
+            FROM drills
+            ORDER BY drill_id DESC;
+        """),
+        use_container_width=True,
+        hide_index=True
+    )
+
 
 
 # ---- Tab 3: Sessions ----
