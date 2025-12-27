@@ -108,23 +108,42 @@ with tab1:
 # ---- Tab 2: Drills ----
 with tab2:
     colL, colR = st.columns([1, 1])
+
     with colL:
         st.markdown("#### 新增訓練項目")
+
         drill_name = st.text_input("訓練項目名稱", key="d_name")
-        objective = st.text_input("目的（可選）", key="d_obj")
-        category = st.text_input("分類（例：serve_receive / defense / attack_chain / serve）", key="d_cat")
+        purpose = st.text_area("目的（可選）", key="d_purpose", height=90)
+
+        # 固定下拉分類（中文）
+        CATEGORY_OPTIONS = ["攻擊", "接發", "防守", "發球", "舉球", "攔網", "綜合"]
+        category = st.selectbox("分類", options=CATEGORY_OPTIONS, key="d_category")
+
         difficulty = st.slider("難度（1-5）", 1, 5, 3, key="d_diff")
+
         if st.button("新增訓練項目", key="d_add"):
-            if not drill_name.strip():
-                st.error("訓練項目名稱必填。")
+            _name = (drill_name or "").strip()
+            _purpose = (purpose or "").strip()
+            _category = (category or "").strip()
+
+            if not _name:
+                st.error("訓練項目名稱不可為空。")
             else:
-                exec_one(con, "INSERT INTO drills (drill_name, objective, category, difficulty) VALUES (?, ?, ?, ?);",
-                         (drill_name.strip(), objective.strip(), category.strip(), int(difficulty)))
+                exec_one(
+                    con,
+                    "INSERT INTO drills (drill_name, purpose, category, difficulty) VALUES (?, ?, ?, ?);",
+                    (_name, _purpose, _category, int(difficulty)),
+                )
                 st.success("已新增。")
+
     with colR:
         st.markdown("#### 訓練項目列表")
-        st.dataframe(df(con, "SELECT drill_id, drill_name, category, difficulty, created_at FROM drills ORDER BY drill_id DESC;"),
-                     use_container_width=True, hide_index=True)
+        st.dataframe(
+            df(con, "SELECT drill_id, drill_name, category, difficulty, created_at FROM drills ORDER BY drill_id DESC;"),
+            use_container_width=True,
+            hide_index=True
+        )
+
 
 # ---- Tab 3: Sessions ----
 with tab3:
@@ -423,7 +442,7 @@ with tab4:
         inferred_focus = _infer_focus_from_session(int(session_id))
         with top3:
             focus = st.selectbox(
-                "項目",
+                "類別",
                 options=["攻擊", "接發", "防守", "發球", "舉球", "攔網", "綜合"],
                 index=["攻擊", "接發", "防守", "發球", "舉球", "攔網", "綜合"].index(inferred_focus),
                 key="t4_focus",
