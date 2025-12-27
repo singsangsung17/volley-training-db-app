@@ -46,14 +46,40 @@ con = init_db_if_needed()
 st.title("排球訓練知識庫（SQLite + Streamlit 最小可用版）")
 st.caption("用途：把 ERD/SQL 附錄變成真的能用的系統。你可以新增球員/訓練/訓練項目，並記錄成效；右側提供常見統計查詢。")
 
-with st.sidebar:
-    st.subheader("資料庫")
-    st.write(f"DB: `{DB_PATH}`")
-    if st.button("重置為示例資料（會清空現有資料）", type="primary"):
+import traceback
+
+def reset_to_seed():
+    try:
+        # 1) 刪掉舊 DB 檔（最乾淨，避免殘留）
         if os.path.exists(DB_PATH):
             os.remove(DB_PATH)
-        con = init_db_if_needed()
-        st.success("已重置。請重新整理頁面。")
+
+        # 2) 重新建表
+        con = connect()
+        with open(SCHEMA_PATH, "r", encoding="utf-8") as f:
+            con.executescript(f.read())
+
+        # 3) 灌入 seed
+        with open(SEED_PATH, "r", encoding="utf-8") as f:
+            con.executescript(f.read())
+
+        con.commit()
+        con.close()
+        return True, None
+    except Exception as e:
+        return False, traceback.format_exc()
+
+# Sidebar reset button
+with st.sidebar:
+    if st.button("重置為示例資料（會清空現有資料）"):
+        ok, err = reset_to_seed()
+        if ok:
+            st.success("已重置為示例資料。")
+            st.rerun()
+        else:
+            st.error("重置失敗，錯誤如下：")
+            st.code(err)
+
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs(["球員 players", "訓練項目 drills", "訓練場次 sessions", "成效紀錄 drill_results", "分析（SQL）"])
 
