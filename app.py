@@ -322,6 +322,13 @@ with tab4:
         # ❷ 提交區放在 form 內：避免重跑造成流程亂
         # =========================
         with st.form("t4_submit_form", clear_on_submit=False):
+            # --- 即時成功率顯示（metric 版） ---
+if int(total_count) == 0:
+    st.metric("成功率", "—", help="填入總次數後顯示（例如 32/50 = 64%）")
+else:
+    rate = float(success_count) / float(total_count)
+    st.metric("成功率", f"{rate:.0%}", help=f"{int(success_count)}/{int(total_count)}")
+
             c1, c2 = st.columns([1.3, 1.3])
 
             with c1:
