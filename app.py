@@ -132,45 +132,65 @@ with tab2:
     colL, colR = st.columns([1, 1])
 
     with colL:
-       st.markdown("#### 新增訓練項目")
+        st.markdown("#### 新增訓練項目")
 
-       drill_name = st.text_input("訓練項目名稱", key="d_name")
+        drill_name = st.text_input("訓練項目名稱", key="d_name")
 
-       CATEGORY_OPTIONS = ["攻擊", "接發", "防守", "發球", "舉球", "攔網", "綜合"]
-       category = st.selectbox("分類", options=CATEGORY_OPTIONS, key="d_category")
+        # 固定下拉分類（中文）
+        CATEGORY_OPTIONS = ["攻擊", "接發", "防守", "發球", "舉球", "攔網", "綜合"]
+        category = st.selectbox("分類", options=CATEGORY_OPTIONS, key="d_category")
 
-       # 每個分類給一組常用「目的」模板（你可再增修）
-       PURPOSE_TEMPLATES = {
-           "攻擊": ["提升擊球點", "加快攻擊節奏", "提升打點選擇", "提升斜線/直線控制"],
-           "接發": ["提升到位率", "穩定平台角度", "提升判斷與移動", "降低失誤率"],
-           "防守": ["提升防守反應", "提升移動與站位", "提升救球品質", "提升二波防守"],
-           "發球": ["提升穩定度", "提升落點控制", "提升破壞性", "降低失誤率"],
-           "舉球": ["提升舉球穩定度", "提升節奏控制", "提升分配判斷", "提升傳球到位"],
-           "攔網": ["提升手型與封網", "提升起跳時機", "提升判斷與移動", "提升連續攔防"],
-           "綜合": ["整合攻防節奏", "提升溝通與配合", "提升臨場決策", "提升整體穩定度"],
+        # 常用目的模板（依分類）
+        PURPOSE_TEMPLATES = {
+            "攻擊": ["提升擊球點", "加快攻擊節奏", "提升打點選擇", "提升斜線/直線控制"],
+            "接發": ["提升到位率", "穩定平台角度", "提升判斷與移動", "降低失誤率"],
+            "防守": ["提升防守反應", "提升移動與站位", "提升救球品質", "提升二波防守"],
+            "發球": ["提升穩定度", "提升落點控制", "提升破壞性", "降低失誤率"],
+            "舉球": ["提升舉球穩定度", "提升節奏控制", "提升分配判斷", "提升傳球到位"],
+            "攔網": ["提升手型與封網", "提升起跳時機", "提升判斷與移動", "提升連續攔防"],
+            "綜合": ["整合攻防節奏", "提升溝通與配合", "提升臨場決策", "提升整體穩定度"],
         }
 
-        preset = st.selectbox("常用目的（可選）", options=["（不使用）"] + PURPOSE_TEMPLATES[category], key="d_preset")
-
-       # 目的仍保留自由輸入；選到模板就自動帶入（可再修改）
-default_purpose = "" if preset == "（不使用）" else preset
-purpose = st.text_area("目的（可選，可自行修改）", value=default_purpose, key="d_purpose", height=90)
-
-difficulty = st.slider("難度（1-5）", 1, 5, 3, key="d_diff")
-
-if st.button("新增訓練項目", key="d_add"):
-    _name = (drill_name or "").strip()
-    _purpose = (purpose or "").strip()
-
-    if not _name:
-        st.error("訓練項目名稱不可為空。")
-    else:
-        exec_one(
-            con,
-            "INSERT INTO drills (drill_name, purpose, category, difficulty) VALUES (?, ?, ?, ?);",
-            (_name, _purpose, category, int(difficulty)),
+        preset = st.selectbox(
+            "常用目的（可選）",
+            options=["（不使用）"] + PURPOSE_TEMPLATES.get(category, []),
+            key="d_preset"
         )
-        st.success("已新增。")
+
+        default_purpose = "" if preset == "（不使用）" else preset
+        purpose = st.text_area("目的（可選，可自行修改）", value=default_purpose, key="d_purpose", height=90)
+
+        difficulty = st.slider("難度（1-5）", 1, 5, 3, key="d_diff")
+
+        if st.button("新增訓練項目", key="d_add"):
+            _name = (drill_name or "").strip()
+            _purpose = (purpose or "").strip()
+
+            if not _name:
+                st.error("訓練項目名稱不可為空。")
+            else:
+                exec_one(
+                    con,
+                    f"INSERT INTO drills (drill_name, {DRILLS_TEXT_COL}, category, difficulty) VALUES (?, ?, ?, ?);",
+                    (_name, _purpose, (category or "").strip(), int(difficulty)),
+                )
+                st.success("已新增。")
+
+    with colR:
+        st.markdown("#### 訓練項目列表（不顯示 id / 難度置前 / 類別中文）")
+        st.dataframe(
+            df(con, """
+                SELECT
+                    difficulty AS 難度,
+                    drill_name AS 訓練項目,
+                    category   AS 類別,
+                    created_at AS 建立時間
+                FROM drills
+                ORDER BY created_at DESC;
+            """),
+            use_container_width=True,
+            hide_index=True
+        )
 
 with colR:
     st.markdown("#### 訓練項目列表")
