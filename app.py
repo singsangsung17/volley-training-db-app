@@ -307,7 +307,7 @@ with tab4:
         inferred_focus = _infer_focus_from_session(int(session_id))
         with top3:
             focus = st.selectbox(
-                "面向（連動主要/次要）",
+                "項目",
                 options=["攻擊", "接發", "防守", "發球", "舉球", "攔網", "綜合"],
                 index=["攻擊", "接發", "防守", "發球", "舉球", "攔網", "綜合"].index(inferred_focus),
                 key="t4_focus",
@@ -331,8 +331,8 @@ with tab4:
                     primary_other = st.text_input("主要修正目標：其他（請輸入）", key="t4_primary_other")
 
             with c2:
-                # 若你希望顯示「你目前選的面向」，可保留；不需要可刪
-                st.caption(f"目前面向：{focus}（由場次推斷：{inferred_focus}）")
+                pass
+
 
             success_count = st.number_input("成功次數（可選）", min_value=0, value=0, step=1, key="t4_success")
             total_count   = st.number_input("總次數（可選）",   min_value=0, value=0, step=1, key="t4_total")
