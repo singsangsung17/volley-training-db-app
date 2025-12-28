@@ -285,24 +285,32 @@ with tab3:
             else:
                 st.warning("尚未為此場次安排任何訓練項目。")
         
-# ---- Tab 4: Results (巨型計數按鈕版) ----
+# ---- Tab 4: Results (終極巨型點擊器 + 原版成功率) ----
 with tab4:
-    # 針對計數按鈕進行「超大化」設定
+    # 專屬 CSS：針對不同功能的按鈕進行精確的大小控制
     st.markdown("""
         <style>
-            /* 讓計數區域的按鈕再大 2/3 */
-            .huge-counter-btn > div > button {
-                height: 8.5em !important;   /* 高度大幅增加 */
-                font-size: 40px !important;  /* 字體極大化 */
-                font-weight: 900 !important; /* 特粗體 */
-                border-radius: 15px !important; /* 圓角明顯一點 */
+            /* 1. 超級巨型計數按鈕 (原本的 2 倍大) */
+            .super-huge-btn > div > button {
+                height: 16em !important;   /* 極致高度 */
+                font-size: 65px !important;  /* 極大字體 */
+                font-weight: 900 !important;
+                border-radius: 25px !important;
+                border: 3px solid #eee !important;
+            }
+            /* 2. 縮小清空計數按鈕 */
+            .small-clear-btn > div > button {
+                height: 2.2em !important;
+                font-size: 14px !important;
+                width: 120px !important;
+                color: #666 !important;
             }
         </style>
     """, unsafe_allow_html=True)
 
     st.subheader("現場數據紀錄")
 
-    # 確保資料即時抓取 (避免 NameError)
+    # 確保資料抓取完整，避免 NameError
     t4_sessions = df(con, "SELECT session_id, session_date, theme FROM sessions ORDER BY session_date DESC;")
     t4_players = df(con, "SELECT player_id, name FROM players ORDER BY name;")
 
@@ -312,7 +320,7 @@ with tab4:
     if t4_sessions.empty or t4_players.empty:
         st.info("請先確認已建立場次與球員資料。")
     else:
-        # --- 選擇區 ---
+        # --- 選擇區 (3欄) ---
         c1, c2, c3 = st.columns(3)
         with c1:
             s_map = {int(r.session_id): f"{r.session_date} | {r.theme}" for r in t4_sessions.itertuples(index=False)}
@@ -321,7 +329,6 @@ with tab4:
             p_map = {int(r.player_id): r.name for r in t4_players.itertuples(index=False)}
             pid = st.selectbox("球員", options=list(p_map.keys()), format_func=lambda x: p_map[x], key="t4_pid")
         with c3:
-            # 過濾掉總結項
             current_drills = df(con, """
                 SELECT d.drill_id, d.drill_name FROM session_drills sd 
                 JOIN drills d ON d.drill_id = sd.drill_id 
@@ -337,11 +344,12 @@ with tab4:
 
         st.divider()
 
-        # --- 核心：巨型計數器按鈕 ---
+        # --- 核心：超級巨型計數器 ---
         if did:
-            st.markdown("#### 即時計數")
-            # 加上 huge-counter-btn 類別
-            st.markdown('<div class="huge-counter-btn">', unsafe_allow_html=True)
+            st.markdown("#### 即時計數 (點擊下方超大區域)")
+            
+            # 使用 super-huge-btn 類別
+            st.markdown('<div class="super-huge-btn">', unsafe_allow_html=True)
             click_l, click_r = st.columns(2)
             with click_l:
                 if st.button("成功", use_container_width=True, type="primary"):
@@ -354,28 +362,35 @@ with tab4:
                     st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
 
-            # 數據顯示
+            # --- 成功率 (回歸原版 st.metric 樣式) ---
             curr_total = st.session_state.count_total
             curr_rate = (st.session_state.count_success / curr_total) if curr_total > 0 else 0
             
-            # 使用大字體顯示當前數據
-            st.write(f"### 目前進度：{st.session_state.count_success} / {curr_total} (成功率 {curr_rate:.1%})")
+            st.write("") # 留白
+            st.metric(
+                label="目前累計表現", 
+                value=f"{st.session_state.count_success} / {curr_total}", 
+                delta=f"成功率 {curr_rate:.1%}"
+            )
 
-            if st.button("清空計數", key="reset_click", use_container_width=True):
+            # --- 清空按鈕 (縮小並靠左) ---
+            st.markdown('<div class="small-clear-btn">', unsafe_allow_html=True)
+            if st.button("清空計數", key="reset_click"):
                 st.session_state.count_success = 0
                 st.session_state.count_total = 0
                 st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
 
             st.divider()
 
-            # --- 正式存檔區 (保持標準大小，避免誤觸) ---
+            # --- 正式存檔區 (保持標準大小) ---
             with st.form("t4_final_save", clear_on_submit=True):
                 st.markdown("#### 確認數據並存檔")
                 f1, f2 = st.columns(2)
                 with f1:
-                    final_s = st.number_input("確認成功數", value=st.session_state.count_success)
+                    final_s = st.number_input("最終成功數", value=st.session_state.count_success)
                 with f2:
-                    final_t = st.number_input("確認總次數", value=st.session_state.count_total)
+                    final_t = st.number_input("最終總次數", value=st.session_state.count_total)
                 
                 issue = st.selectbox("主要問題", ["無", "腳步不到位", "擊球點錯誤", "觀察判斷遲緩", "溝通喊聲不足"])
                 notes = st.text_area("備註", height=80)
