@@ -166,7 +166,7 @@ with tab2:
     with colL:
         st.subheader("新增訓練項目")
         drill_name = st.text_input("訓練項目名稱", key="d_name")
-        category = st.selectbox("分類", options=["攻擊", "接發", "防守", "發球", "舉球", "攔網", "綜合"], key="d_category")
+        category = st.selectbox("分類", options=["攻擊", "接發", "防守", "發球", "舉球", "攔網", "接球", "傳球", "綜合"], key="d_category")
         num_people = st.number_input("建議人數", min_value=1, value=6, step=1, key="d_people")
         people_display = f"{num_people}人以上"
         st.info(f"目前設定：{people_display}")
@@ -444,7 +444,8 @@ with tab5:
         "attack": "攻擊", "defense": "防守", "serve": "發球", 
         "set": "舉球", "receive": "接發", "block": "攔網",
         "attack_chain": "攻擊鏈", "serve_receive": "接發球",
-        "綜合": "綜合", "攻擊": "攻擊", "接發": "接發", "防守": "防守", "發球": "發球", "舉球": "舉球", "攔網": "攔網"
+        "receive": "接發", "set": "舉球",
+        "綜合": "綜合", "攻擊": "攻擊", "接發": "接發", "防守": "防守", "發球": "發球", "舉球": "舉球", "攔網": "攔網", "接球": "接球", "傳球": "傳球"
     }
 
     # 1. 頂層：全隊關鍵績效指標 (KPI Cards)
@@ -471,7 +472,7 @@ with tab5:
         with sel_c1:
             sel_p = st.selectbox("分析球員", options=p_list['player_id'], format_func=lambda x: p_list[p_list['player_id']==x]['name'].values[0], key="deep_p")
         with sel_c2:
-            sel_cat = st.selectbox("技術類別", options=["攻擊", "接發", "防守", "發球", "舉球", "攔網"], key="deep_cat")
+            sel_cat = st.selectbox("技術類別", options=["攻擊", "接發", "防守", "發球", "舉球", "攔網", "接球", "傳球"], key="deep_cat")
 
         col_radar, col_trend = st.columns([1, 1.2])
         
