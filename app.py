@@ -127,41 +127,75 @@ with tab1:
 )
 
 
-# ---- Tab 2: Drills (已合併重複表格、修正縮排) ----
+# ---- Tab 2: Drills (已修正縮排、找回難易度、合併表格) ----
 with tab2:
     colL, colR = st.columns([1, 1])
 
     with colL:
         st.markdown("#### 新增訓練項目")
+        
         drill_name = st.text_input("訓練項目名稱", key="d_name")
+
+        # 1. 分類選擇
         CATEGORY_OPTIONS = ["攻擊", "接發", "防守", "發球", "舉球", "攔網", "綜合"]
         category = st.selectbox("分類", options=CATEGORY_OPTIONS, key="d_category")
-        
-        # 這裡保留你原本的 PURPOSE_TEMPLATES 邏輯...
-        # (中間省略部分代碼以節省篇幅)
 
+        # 2. 目的模板邏輯 (保持原本功能)
+        PURPOSE_TEMPLATES = {
+            "攻擊": ["提升擊球點", "加快攻擊節奏", "提升打點選擇", "提升斜線/直線控制"],
+            "接發": ["提升到位率", "穩定平台角度", "提升判斷與移動", "降低失誤率"],
+            "防守": ["提升防守反應", "提升移動與站位", "提升救球品質", "提升二波防守"],
+            "發球": ["提升穩定度", "提升落點控制", "提升破壞性", "降低失誤率"],
+            "舉球": ["提升舉球穩定度", "提升節奏控制", "提升分配判斷", "提升傳球到位"],
+            "攔網": ["提升手型與封網", "提升起跳時機", "提升判斷與移動", "提升連續攔防"],
+            "綜合": ["整合攻防節奏", "提升溝通與配合", "提升臨場決策", "提升整體穩定度"],
+        }
+        
+        preset = st.selectbox(
+            "常用目的（可選）",
+            options=["（不使用）"] + PURPOSE_TEMPLATES.get(category, []),
+            key="d_preset"
+        )
+        default_purpose = "" if preset == "（不使用）" else preset
+        purpose = st.text_area("目的（可選，可自行修改）", value=default_purpose, key="d_purpose", height=90)
+
+        # 3. 找回來的難易度拉桿 (原本不見的部分)
+        difficulty = st.slider("難度（1-5）", 1, 5, 3, key="d_diff")
+
+        # 4. 新增按鈕
         if st.button("新增訓練項目", key="d_add"):
-            if not drill_name.strip():
+            _name = (drill_name or "").strip()
+            _purpose = (purpose or "").strip()
+
+            if not _name:
                 st.error("訓練項目名稱不可為空。")
             else:
-                exec_one(con, f"INSERT INTO drills (drill_name, {DRILLS_TEXT_COL}, category, difficulty) VALUES (?, ?, ?, ?);",
-                         (drill_name.strip(), purpose.strip(), category, int(difficulty)))
+                exec_one(
+                    con,
+                    f"INSERT INTO drills (drill_name, {DRILLS_TEXT_COL}, category, difficulty) VALUES (?, ?, ?, ?);",
+                    (_name, _purpose, (category or "").strip(), int(difficulty)),
+                )
                 st.success("已新增。")
                 st.rerun()
 
     with colR:
         st.markdown("#### 訓練項目列表")
-        # 這裡只保留一個 st.dataframe，並整合類別轉換邏輯
+        # 這裡整合了 CASE WHEN 邏輯，只會顯示一個漂亮的表格
         st.dataframe(
             df(con, """
                 SELECT 
                     difficulty AS 難度,
                     drill_name AS 訓練項目,
                     CASE 
-                        WHEN category = 'attack_chain' OR category = '攻擊' THEN '攻擊'
-                        WHEN category = 'serve_receive' OR category = '接發' THEN '接發'
-                        -- (依此類推加入其他判斷...)
-                        ELSE category 
+                        WHEN category IN ('攻擊','接發','防守','發球','舉球','攔網','綜合') THEN category
+                        WHEN category = 'attack_chain' THEN '攻擊'
+                        WHEN category = 'serve_receive' THEN '接發'
+                        WHEN category = 'defense' THEN '防守'
+                        WHEN category = 'serve' THEN '發球'
+                        WHEN category IN ('set','setting') THEN '舉球'
+                        WHEN category IN ('block','blocking') THEN '攔網'
+                        WHEN category IN ('all','mix','mixed','comprehensive','summary') THEN '綜合'
+                        ELSE COALESCE(category, '')
                     END AS 類別,
                     created_at AS 建立時間
                 FROM drills 
