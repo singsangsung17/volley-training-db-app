@@ -414,8 +414,10 @@ import plotly.express as px  # 確保你在程式碼最上方有 import plotly.e
 import plotly.express as px
 
 # 2. 右欄：全隊技術短板 (橫式圖表 - 優化配色可讀性)
+    # 2. 右欄：全隊技術短板 (解決縮進錯誤 + 顏色優化)
     with col_team:
         st.markdown("#### 全隊技術短板分析")
+        
         team_stats = df(con, """
             SELECT d.category AS cat,
                    CAST(SUM(r.success_count) AS FLOAT) / SUM(r.total_count) * 100 AS rate
@@ -426,12 +428,12 @@ import plotly.express as px
         """)
         
         if not team_stats.empty:
+            # 轉換中文標籤
             team_stats['技術類別'] = team_stats['cat'].apply(lambda x: CAT_MAP.get(x, x))
             team_stats['成功率(%)'] = team_stats['rate'].round(1)
-            # 排序：讓短板（成功率低）排在最上面
             plot_df = team_stats.sort_values(by='成功率(%)', ascending=True)
 
-            # 使用 Plotly 畫橫向條形圖
+            # 使用 Plotly 畫圖
             fig_bar = px.bar(
                 plot_df, 
                 x="成功率(%)", 
@@ -439,23 +441,24 @@ import plotly.express as px
                 orientation='h',
                 text="成功率(%)", 
                 color="成功率(%)",
-                color_continuous_scale='Blues', # 維持你喜歡的藍色系
-                range_x=[0, 100],     # X軸刻度固定 0-100
-                range_color=[0, 100]  # 【關鍵修改】強制顏色階層也對應 0-100%
+                color_continuous_scale='Blues', 
+                range_x=[0, 100],
+                # 【顏色救星】：強制將色階對應到 0-100，這樣 60% 的防守就不會太淺
+                range_color=[0, 100] 
             )
             
-            # 優化圖表佈局，隱藏不需要的圖例和座標軸標題
+            # 美化版面
             fig_bar.update_layout(
                 showlegend=False, 
-                xaxis_title="", # 移除 X 軸標題，因為圖上有數字了
-                yaxis_title="", # 移除 Y 軸標題
+                xaxis_title="", 
+                yaxis_title="", 
                 height=400,
-                margin=dict(l=20, r=20, t=30, b=20), # 調整邊距
-                coloraxis_showscale=False # 隱藏旁邊的顏色條，讓畫面更乾淨
+                margin=dict(l=20, r=20, t=30, b=20),
+                coloraxis_showscale=False # 隱藏側邊顏色條
             )
-            fig_bar.update_traces(textposition='outside', textfont_size=14) # 數字加大並放在外面
+            fig_bar.update_traces(textposition='outside', textfont_size=14)
             
             st.plotly_chart(fig_bar, use_container_width=True)
-            st.info("💡 **教練洞察**：圖表上方、顏色較淺的項目（如：防守）是目前球隊成功率最低的環節，建議列為下週訓練重點。")
+            st.info("💡 橫條越短、顏色越淺的項目，代表是球隊目前的薄弱環節。")
         else:
             st.info("尚無全隊統計數據。")
