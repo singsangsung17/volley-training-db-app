@@ -413,50 +413,7 @@ import plotly.express as px  # 確保你在程式碼最上方有 import plotly.e
 
 import plotly.express as px
 
-# ---- Tab 5: Analytics (Plotly 專業修復版) ----
-with tab5:
-    st.subheader("數據戰報與進步趨勢")
-    
-    # 中文映射字典，確保圖表標籤美觀
-    CAT_MAP = {
-        "attack": "攻擊", "defense": "防守", "serve": "發球", 
-        "set": "舉球", "receive": "接發", "block": "攔網",
-        "attack_chain": "攻擊鏈", "serve_receive": "接發球"
-    }
-
-    col_trend, col_team = st.columns([1, 1.2])
-
-    # 1. 左欄：個人成長趨勢
-    with col_trend:
-        st.markdown("#### 個人技術成長曲線")
-        p_data = df(con, "SELECT player_id, name FROM players ORDER BY name;")
-        if not p_data.empty:
-            c1, c2 = st.columns(2)
-            with c1:
-                sel_p_id = st.selectbox("選擇球員", options=p_data['player_id'], 
-                                        format_func=lambda x: p_data[p_data['player_id']==x]['name'].values[0], key="ana_p")
-            with c2:
-                sel_cat = st.selectbox("技術類別", options=["攻擊", "接發", "防守", "發球", "舉球", "攔網"], key="ana_cat")
-
-            trend_df = df(con, """
-                SELECT strftime('%Y-%m-%d', s.session_date) AS 日期,
-                       SUM(r.success_count) AS 成功, SUM(r.total_count) AS 總次數
-                FROM drill_results r
-                JOIN sessions s ON s.session_id = r.session_id
-                JOIN drills d ON d.drill_id = r.drill_id
-                WHERE r.player_id = ? AND (d.category = ? OR d.drill_name LIKE '%' || ? || '%')
-                GROUP BY 日期 ORDER BY 日期 ASC
-            """, (int(sel_p_id), sel_cat, sel_cat))
-
-            if not trend_df.empty:
-                trend_df['成功率'] = (trend_df['成功'] / trend_df['總次數'] * 100).round(1)
-                fig_line = px.line(trend_df, x='日期', y='成功率', markers=True, 
-                                   labels={'成功率': '成功率 (%)'}, title=f"{sel_cat} 趨勢")
-                st.plotly_chart(fig_line, use_container_width=True)
-            else:
-                st.info("尚無足夠數據產生曲線。")
-
-    # 2. 右欄：全隊技術短板 (橫式圖表)
+# 2. 右欄：全隊技術短板 (橫式圖表 - 優化配色可讀性)
     with col_team:
         st.markdown("#### 全隊技術短板分析")
         team_stats = df(con, """
@@ -471,16 +428,34 @@ with tab5:
         if not team_stats.empty:
             team_stats['技術類別'] = team_stats['cat'].apply(lambda x: CAT_MAP.get(x, x))
             team_stats['成功率(%)'] = team_stats['rate'].round(1)
+            # 排序：讓短板（成功率低）排在最上面
             plot_df = team_stats.sort_values(by='成功率(%)', ascending=True)
 
             # 使用 Plotly 畫橫向條形圖
             fig_bar = px.bar(
-                plot_df, x="成功率(%)", y="技術類別", orientation='h',
-                text="成功率(%)", color="成功率(%)",
-                color_continuous_scale='Blues', range_x=[0, 100]
+                plot_df, 
+                x="成功率(%)", 
+                y="技術類別", 
+                orientation='h',
+                text="成功率(%)", 
+                color="成功率(%)",
+                color_continuous_scale='Blues', # 維持你喜歡的藍色系
+                range_x=[0, 100],     # X軸刻度固定 0-100
+                range_color=[0, 100]  # 【關鍵修改】強制顏色階層也對應 0-100%
             )
-            fig_bar.update_layout(showlegend=False, xaxis_title="成功率 (%)", yaxis_title="", height=400)
-            fig_bar.update_traces(textposition='outside')
+            
+            # 優化圖表佈局，隱藏不需要的圖例和座標軸標題
+            fig_bar.update_layout(
+                showlegend=False, 
+                xaxis_title="", # 移除 X 軸標題，因為圖上有數字了
+                yaxis_title="", # 移除 Y 軸標題
+                height=400,
+                margin=dict(l=20, r=20, t=30, b=20), # 調整邊距
+                coloraxis_showscale=False # 隱藏旁邊的顏色條，讓畫面更乾淨
+            )
+            fig_bar.update_traces(textposition='outside', textfont_size=14) # 數字加大並放在外面
+            
             st.plotly_chart(fig_bar, use_container_width=True)
+            st.info("💡 **教練洞察**：圖表上方、顏色較淺的項目（如：防守）是目前球隊成功率最低的環節，建議列為下週訓練重點。")
         else:
             st.info("尚無全隊統計數據。")
