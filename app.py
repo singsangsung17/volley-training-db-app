@@ -5,7 +5,7 @@ from typing import Optional, Tuple
 
 import pandas as pd
 import streamlit as st
-import plotly.express as
+import plotly.express as px
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(APP_DIR, "volley_training.db")
