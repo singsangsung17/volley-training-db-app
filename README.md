@@ -23,17 +23,19 @@
 ---
 
 ## Project Structure (expected)
-> 專案會使用 `schema.sql` 建表、`seed_data.sql` 灌入示例資料，並建立 `volley_training.db` 作為 SQLite 資料庫檔案。
 
+專案會使用 `schema.sql` 建表、`seed_data.sql` 灌入示例資料，並建立 `volley_training.db` 作為 SQLite 資料庫檔案。
+
+```text
 .
-├─ app.py # Streamlit 主程式（若你的檔名不同，請以實際檔名為準）
-├─ schema.sql # 建表 SQL（必備）
-├─ seed_data.sql # 示例資料 SQL（必備）
-├─ volley_training.db # SQLite DB（首跑自動生成；可重置）
+├─ app.py               (Streamlit 主程式；若你的檔名不同，請以實際檔名為準)
+├─ schema.sql           (建表 SQL，必備)
+├─ seed_data.sql        (示例資料 SQL，必備)
+├─ volley_training.db   (SQLite DB；首跑自動生成，可重置)
 └─ README.md
 
----
 
+---
 ## Quick Start
 
 ### 1) Create venv (recommended)
@@ -44,30 +46,34 @@ python -m venv .venv
 # macOS/Linux
 source .venv/bin/activate
 
-2) Install dependencies
+### 2) Install dependencies
 pip install streamlit pandas plotly
-3) Run
+
+### 3) Run
 streamlit run app.py
-Database Initialization & Reset
 
-首次啟動：若 volley_training.db 不存在，系統會自動建立資料庫並灌入 seed_data.sql。
+## Database Initialization & Reset
 
-每次啟動：系統會確保 schema.sql 已套用（避免缺表）。
+- 首次啟動：若 volley_training.db 不存在，系統會自動建立資料庫並灌入 seed_data.sql。
 
-側邊欄重置為示例資料：會刪除現有 volley_training.db，重新建表並灌入 seed。
+- 每次啟動：系統會確保 schema.sql 已套用（避免缺表）。
 
-Notes
+- 側邊欄重置為示例資料：會刪除現有 volley_training.db，重新建表並灌入 seed。
 
-本專案為 單機 SQLite 模式：資料儲存在 volley_training.db。
+## Notes
 
-若部署在部分雲端環境（檔案系統可能不持久化），建議改用外部資料庫或加入匯出/備份機制。
+- 本專案為 單機 SQLite 模式：資料儲存在 volley_training.db。
 
-drills 表描述欄位支援 purpose 或 objective 其一（程式會自動偵測），若兩者皆無可能導致頁面中止。
+- 若部署在部分雲端環境（檔案系統可能不持久化），建議改用外部資料庫或加入匯出/備份機制。
 
-Roadmap (optional)
+- drills 表描述欄位支援 purpose 或 objective 其一（程式會自動偵測）；若兩者皆無，可能導致頁面中止。
 
-帳號/權限（隊長、教練、球員）與多隊伍資料分區
+## Roadmap (optional)
 
-CSV 匯出/匯入與自動週報
+- 帳號/權限（隊長、教練、球員）與多隊伍資料分區
 
-更完整的技術鏈路（如接發/攻擊鏈）資料模型與儀表板
+- CSV 匯出/匯入與自動週報
+
+- 更完整的技術鏈路（如接發/攻擊鏈）資料模型與儀表板
+
+
