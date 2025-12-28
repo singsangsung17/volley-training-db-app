@@ -12,6 +12,32 @@ SCHEMA_PATH = os.path.join(APP_DIR, "schema.sql")
 SEED_PATH = os.path.join(APP_DIR, "seed_data.sql")
 
 st.set_page_config(page_title="排球訓練知識庫（最小可用版）", layout="wide")
+# 統一全域按鈕顏色為綠色
+st.markdown("""
+<style>
+    /* 定義 primary 按鈕的顏色 */
+    div.stButton > button[kind="primary"] {
+        background-color: #28a745; /* 綠色背景 */
+        color: white;             /* 白色文字 */
+        border: none;
+        border-radius: 5px;       /* 圓角 */
+        padding: 0.5rem 1rem;
+    }
+    
+    /* 滑鼠移上去時變深一點的綠色 */
+    div.stButton > button[kind="primary"]:hover {
+        background-color: #218838;
+        color: white;
+        border: none;
+    }
+    
+    /* 按鈕點擊時的顏色 */
+    div.stButton > button[kind="primary"]:active {
+        background-color: #1e7e34;
+        color: white;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 def connect():
     con = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -92,41 +118,43 @@ with st.sidebar:
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs(["球員 players", "訓練項目 drills", "訓練場次 sessions", "成效紀錄 drill_results", "分析（SQL）"])
 
-# ---- Tab 1: Players ----
+# ---- Tab 1: Players (美化 & 綠色按鈕版) ----
 with tab1:
     colL, colR = st.columns([1, 1])
     with colL:
-        st.markdown("#### 新增球員")
+        st.subheader("新增球員")
         name = st.text_input("姓名", key="p_name")
         POS_OPTIONS = ["主攻", "攔中", "副攻", "舉球", "自由", "（不填）"]
         pos_sel = st.selectbox("位置（可選）", POS_OPTIONS, index=0, key="p_pos_sel")
         position = "" if pos_sel == "（不填）" else pos_sel
 
         grade_year = st.text_input("年級（例：大一/大二）", key="p_grade")
-        if st.button("新增球員", key="p_add"):
+        
+        # --- 關鍵改動：加上 type="primary" 寬度設為滿版 ---
+        if st.button("新增球員", key="p_add", type="primary", use_container_width=True):
             if not name.strip():
                 st.error("姓名必填。")
             else:
                 exec_one(con, "INSERT INTO players (name, position, grade_year) VALUES (?, ?, ?);",
                          (name.strip(), position, grade_year.strip()))
-                st.success("已新增。")
+                st.success(f"球員 {name} 已成功加入列表")
+                st.rerun()
+                
     with colR:
-        st.markdown("#### 球員列表")
+        st.subheader("球員列表")
         st.dataframe(
-    df(con, """
-        SELECT
-          name       AS 姓名,
-          position   AS 位置,
-          grade_year AS 年級,
-          created_at AS 建立時間
-        FROM players
-        ORDER BY created_at DESC;
-    """),
-    use_container_width=True,
-    hide_index=True,
-)
-
-
+            df(con, """
+                SELECT 
+                  name AS 姓名,
+                  position AS 位置,
+                  grade_year AS 年級,
+                  created_at AS 建立時間
+                FROM players 
+                ORDER BY created_at DESC;
+            """),
+            use_container_width=True,
+            hide_index=True,
+        )
 # ---- Tab 2: Drills (按鈕加色 + 簡約版) ----
 with tab2:
     colL, colR = st.columns([1, 1])
