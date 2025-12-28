@@ -204,87 +204,84 @@ with tab2:
             hide_index=True
         )
         
-# ---- Tab 3: Sessions (簡約專業版) ----
+# ---- Tab 3: Sessions (場次安排：恢復預計組次名稱) ----
 with tab3:
-    colL, colR = st.columns([1, 1.3]) 
+    st.subheader("場次管理與項目安排")
 
-    sessions = df(con, "SELECT session_id, session_date, theme, duration_min FROM sessions ORDER BY session_date DESC, session_id DESC;")
-    drills = df(con, "SELECT drill_id, drill_name FROM drills WHERE category != 'summary' ORDER BY drill_name;")
+    # 建立左右兩欄
+    col_manage, col_flow = st.columns([1, 1.5])
 
-    with colL:
-        st.subheader("場次安排")
-        if sessions.empty:
-            st.info("目前沒有場次。")
-            selected_session_id = None
-        else:
-            session_ids = sessions["session_id"].tolist()
-            session_label_map = {int(r.session_id): f"{r.session_date} | {r.theme}" for r in sessions.itertuples(index=False)}
-            
-            selected_session_id = st.selectbox(
-                "選擇目前操作場次",
-                options=session_ids,
-                format_func=lambda sid: session_label_map.get(int(sid), str(sid)),
-                key="t3_select_sid"
-            )
+    with col_manage:
+        # 1. 新增場次
+        with st.expander("新增訓練場次"):
+            new_date = st.date_input("日期", key="new_s_date")
+            new_theme = st.text_input("訓練主題 (如：綜合訓練)", key="new_s_theme")
+            if st.button("確認新增場次", type="primary", use_container_width=True):
+                if new_theme:
+                    exec_one(con, "INSERT INTO sessions (session_date, theme) VALUES (?, ?)", 
+                             (str(new_date), new_theme))
+                    st.success(f"已新增：{new_date} {new_theme}")
+                    st.rerun()
+                else:
+                    st.error("請輸入訓練主題")
 
         st.divider()
-        st.markdown("#### 加入項目")
-        if selected_session_id and not drills.empty:
-            drill_ids = drills["drill_id"].tolist()
-            drill_label_map = {int(r.drill_id): r.drill_name for r in drills.itertuples(index=False)}
+
+        # 2. 選擇場次與加入項目
+        sessions_df = df(con, "SELECT session_id, session_date, theme FROM sessions ORDER BY session_date DESC;")
+        if not sessions_df.empty:
+            s_map = {int(r.session_id): f"{r.session_date} | {r.theme}" for r in sessions_df.itertuples(index=False)}
+            sid = st.selectbox("選擇目前操作場次", options=list(s_map.keys()), format_func=lambda x: s_map[x], key="s3_sid")
+
+            st.markdown("#### 加入項目")
+            drills_df = df(con, "SELECT drill_id, drill_name FROM drills WHERE category != 'summary' ORDER BY drill_name;")
+            d_map = {int(r.drill_id): r.drill_name for r in drills_df.itertuples(index=False)}
             
-            sel_drill_id = st.selectbox("訓練項目", options=drill_ids, format_func=lambda did: drill_label_map.get(int(did), str(did)))
+            sel_did = st.selectbox("選擇訓練項目", options=list(d_map.keys()), format_func=lambda x: d_map[x])
             
             c1, c2 = st.columns(2)
             with c1:
-                next_seq = con.execute("SELECT COALESCE(MAX(sequence_no), 0) + 1 FROM session_drills WHERE session_id=?;", (int(selected_session_id),)).fetchone()[0]
-                seq = st.number_input("項目順序", min_value=1, value=int(next_seq))
+                order = st.number_input("項目順序", min_value=1, value=1)
             with c2:
-                p_min = st.number_input("預計分鐘", min_value=0, value=20, step=5)
+                mins = st.number_input("預計分鐘", min_value=5, step=5, value=20)
             
-            p_sets = st.text_input("預計組次 (例如: 50*2, 3組)", value="3")
+            # 標籤改回預計組次，移除多餘文字
+            target = st.text_input("預計組次 (例如: 50*2 或 50下)", value="50下")
 
-            # 按鈕上色請見下方說明
-            if st.button("確認加入流程", use_container_width=True, type="primary"):
+            if st.button("確認加入流程", type="primary", use_container_width=True):
                 exec_one(con, """
-                    INSERT OR REPLACE INTO session_drills (session_id, drill_id, sequence_no, planned_minutes, planned_reps) 
-                    VALUES (?, ?, ?, ?, ?);
-                """, (int(selected_session_id), int(sel_drill_id), int(seq), int(p_min), p_sets))
-                st.success("已成功加入訓練清單")
+                    INSERT INTO session_drills (session_id, drill_id, drill_order, duration_minutes, target_reps)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (int(sid), int(sel_did), int(order), int(mins), target))
+                st.success("已加入流程")
                 st.rerun()
+        else:
+            st.info("請先新增訓練場次。")
 
-    with colR:
-        st.subheader("本場訓練流程")
-        if selected_session_id:
-            current_drills_df = df(con, """
-                SELECT 
-                    sd.sequence_no AS 順序, 
-                    d.drill_name AS 訓練內容,
-                    sd.planned_minutes AS 分鐘, 
-                    sd.planned_reps AS 預計量
+    with col_flow:
+        st.markdown("#### 本場訓練流程")
+        if not sessions_df.empty:
+            # SQL 查詢中的別名也改為「預計組次」
+            flow_df = df(con, """
+                SELECT sd.drill_order AS No, d.drill_name AS 訓練內容, 
+                       sd.duration_minutes || ' min' AS 分鐘, 
+                       sd.target_reps AS 預計組次
                 FROM session_drills sd
                 JOIN drills d ON d.drill_id = sd.drill_id
                 WHERE sd.session_id = ?
-                ORDER BY sd.sequence_no ASC;
-            """, (int(selected_session_id),))
+                ORDER BY sd.drill_order ASC
+            """, (int(sid),))
 
-            if not current_drills_df.empty:
-                total_minutes = current_drills_df["分鐘"].sum()
+            if not flow_df.empty:
+                st.table(flow_df)
+                total_min = df(con, "SELECT SUM(duration_minutes) FROM session_drills WHERE session_id = ?", (int(sid),)).iloc[0,0]
+                st.info(f"本場次規劃統計：總時長共 {total_min} 分鐘。")
                 
-                # 移除 Emoji 的表格設定
-                st.dataframe(
-                    current_drills_df,
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "順序": st.column_config.NumberColumn("No.", width="small"),
-                        "分鐘": st.column_config.NumberColumn("分鐘", format="%d min"),
-                    }
-                )
-
-                st.info(f"本場次規劃統計：總時長共 {total_minutes} 分鐘。請確保訓練內容在時限內完成。")
+                if st.button("清空本場次流程", key="clear_flow"):
+                    exec_one(con, "DELETE FROM session_drills WHERE session_id = ?", (int(sid),))
+                    st.rerun()
             else:
-                st.warning("尚未為此場次安排任何訓練項目。")
+                st.write("目前尚無排定項目。")
         
 # ---- Tab 4: Results (終極巨型按鈕 + 確保過濾總結) ----
 with tab4:
