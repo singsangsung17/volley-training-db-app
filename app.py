@@ -190,63 +190,61 @@ with tab2:
             hide_index=True
         )
         
-# ---- Tab 3: Sessions (視覺優化版：移除底下列、優化表格美感) ----
+# ---- Tab 3: Sessions (簡潔專業版：去除圖示、強化層次) ----
 with tab3:
-    # 調整左右比例，右邊表格區給多一點空間
-    colL, colR = st.columns([1, 1.3]) 
+    # 稍微調整比例，讓右側資料呈現更寬廣
+    colL, colR = st.columns([1, 1.4]) 
 
     # 1. 抓取場次清單
-    sessions = df(con, "SELECT session_id, session_date, theme, duration_min FROM sessions ORDER BY session_date DESC, session_id DESC;")
+    sessions = df(con, "SELECT session_id, session_date, theme FROM sessions ORDER BY session_date DESC, session_id DESC;")
     
     # 2. 抓取訓練項目 (排除總結項)
     drills = df(con, "SELECT drill_id, drill_name FROM drills WHERE category != 'summary' ORDER BY drill_name;")
 
     with colL:
-        st.subheader("🗓️ 場次安排")
+        st.markdown("### 場次選取")
         if sessions.empty:
-            st.info("目前沒有場次。")
+            st.info("目前尚無場次資料。")
             selected_session_id = None
         else:
             session_ids = sessions["session_id"].tolist()
             session_label_map = {int(r.session_id): f"{r.session_date} | {r.theme}" for r in sessions.itertuples(index=False)}
             
             selected_session_id = st.selectbox(
-                "選擇目前操作場次",
+                "目前操作場次",
                 options=session_ids,
                 format_func=lambda sid: session_label_map.get(int(sid), str(sid)),
-                key="t3_select_sid"
+                key="t3_select_sid_clean"
             )
 
-        st.divider() # 加入分隔線，增加層次感
-        st.markdown("#### ➕ 加入項目")
+        st.markdown("---")
+        st.markdown("### 項目規劃")
         if selected_session_id and not drills.empty:
             drill_ids = drills["drill_id"].tolist()
             drill_label_map = {int(r.drill_id): r.drill_name for r in drills.itertuples(index=False)}
             
             sel_drill_id = st.selectbox("訓練項目", options=drill_ids, format_func=lambda did: drill_label_map.get(int(did), str(did)))
             
+            # 排版：將數字輸入框放在同一行，節省空間
             c1, c2 = st.columns(2)
             with c1:
-                # 自動計算下一個順序
                 next_seq = con.execute("SELECT COALESCE(MAX(sequence_no), 0) + 1 FROM session_drills WHERE session_id=?;", (int(selected_session_id),)).fetchone()[0]
-                seq = st.number_input("項目順序", min_value=1, value=int(next_seq))
+                seq = st.number_input("執行順序", min_value=1, value=int(next_seq))
             with c2:
-                p_min = st.number_input("預計分鐘", min_value=0, value=20, step=5)
+                p_min = st.number_input("預計時間 (分鐘)", min_value=0, value=20, step=5)
             
             p_sets = st.text_input("預計組次 (例如: 50*2, 3組)", value="3")
 
-            if st.button("確認加入流程", use_container_width=True, type="primary"): # 使用 primary 顏色按鈕
+            if st.button("確認加入", use_container_width=True):
                 exec_one(con, """
                     INSERT OR REPLACE INTO session_drills (session_id, drill_id, sequence_no, planned_minutes, planned_reps) 
                     VALUES (?, ?, ?, ?, ?);
                 """, (int(selected_session_id), int(sel_drill_id), int(seq), int(p_min), p_sets))
-                st.success("已成功加入訓練清單")
                 st.rerun()
 
     with colR:
-        st.subheader("📝 本場訓練流程")
+        st.markdown("### 本場訓練流程")
         if selected_session_id:
-            # 抓取資料
             current_drills_df = df(con, """
                 SELECT 
                     sd.sequence_no AS 順序, 
@@ -260,32 +258,25 @@ with tab3:
             """, (int(selected_session_id),))
 
             if not current_drills_df.empty:
-                # 計算總時間
-                total_minutes = current_drills_df["分鐘"].sum()
-                
-                # 【優化 1】：移除原本的 concat 總計行邏輯，直接顯示純粹的表格
-                # 【優化 2】：使用 column_config 讓標題與對齊更專業
+                # 顯示表格，去除裝飾性圖示
                 st.dataframe(
                     current_drills_df,
                     use_container_width=True,
                     hide_index=True,
                     column_config={
-                        "順序": st.column_config.NumberColumn("No.", width="small"),
-                        "訓練項目": st.column_config.TextColumn("訓練內容", width="medium"),
-                        "分鐘": st.column_config.NumberColumn("⏱️ 分鐘", format="%d min"),
-                        "預計組次": st.column_config.TextColumn("📊 預計量")
+                        "順序": st.column_config.NumberColumn("序號", width=60),
+                        "訓練項目": st.column_config.TextColumn("訓練內容"),
+                        "分鐘": st.column_config.NumberColumn("時間 (min)"),
+                        "預計組次": st.column_config.TextColumn("規劃量")
                     }
                 )
 
-                # 【優化 3】：美化藍色訊息框
-                st.info(f"💡 **本場次規劃統計**：總時長共 **{total_minutes}** 分鐘。請確保訓練內容在時限內完成。")
-                
-                # 可選：如果想更吸睛，可以用 metric 顯示
-                # st.metric("規劃總時長", f"{total_minutes} 分鐘", delta="預估時間")
+                # 統計數據顯示 (純文字強調)
+                total_minutes = current_drills_df["分鐘"].sum()
+                st.info(f"本場次規劃總時長：{total_minutes} 分鐘")
                 
             else:
-                st.empty()
-                st.warning("⚠️ 尚未為此場次安排任何訓練項目。")
+                st.warning("尚未安排訓練內容。")
         
 # ---- Tab 4: Results ----
 with tab4:
