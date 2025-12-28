@@ -5,6 +5,7 @@ from typing import Optional, Tuple
 
 import pandas as pd
 import streamlit as st
+import plotly.express as
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(APP_DIR, "volley_training.db")
@@ -409,12 +410,53 @@ with tab4:
                     st.success("數據已成功錄入")
                     st.rerun()
                 
-import plotly.express as px  # 確保你在程式碼最上方有 import plotly.express as px
 
-import plotly.express as px
+# ---- Tab 5: Analytics (修正縮進與顏色優化) ----
+with tab5:
+    st.subheader("數據戰報與進步趨勢")
+    
+    # 中文映射，確保圖表顯示中文
+    CAT_MAP = {
+        "attack": "攻擊", "defense": "防守", "serve": "發球", 
+        "set": "舉球", "receive": "接發", "block": "攔網",
+        "attack_chain": "攻擊鏈", "serve_receive": "接發球"
+    }
 
-# 2. 右欄：全隊技術短板 (橫式圖表 - 優化配色可讀性)
-    # 2. 右欄：全隊技術短板 (解決縮進錯誤 + 顏色優化)
+    col_trend, col_team = st.columns([1, 1.2])
+
+    # 1. 左半邊：個人趨勢
+    with col_trend:
+        st.markdown("#### 個人技術成長曲線")
+        p_data = df(con, "SELECT player_id, name FROM players ORDER BY name;")
+        
+        if not p_data.empty:
+            c1, c2 = st.columns(2)
+            with c1:
+                sel_p_id = st.selectbox("選擇球員", options=p_data['player_id'], 
+                                        format_func=lambda x: p_data[p_data['player_id']==x]['name'].values[0], key="ana_p")
+            with c2:
+                c_options = ["攻擊", "接發", "防守", "發球", "舉球", "攔網"]
+                sel_cat = st.selectbox("技術類別", options=c_options, key="ana_cat")
+
+            trend_df = df(con, """
+                SELECT strftime('%Y-%m-%d', s.session_date) AS 日期,
+                       SUM(r.success_count) AS 成功, SUM(r.total_count) AS 總次數
+                FROM drill_results r
+                JOIN sessions s ON s.session_id = r.session_id
+                JOIN drills d ON d.drill_id = r.drill_id
+                WHERE r.player_id = ? AND (d.category = ? OR d.drill_name LIKE '%' || ? || '%')
+                GROUP BY 日期 ORDER BY 日期 ASC
+            """, (int(sel_p_id), sel_cat, sel_cat))
+
+            if not trend_df.empty:
+                trend_df['成功率'] = (trend_df['成功'] / trend_df['總次數'] * 100).round(1)
+                fig_line = px.line(trend_df, x='日期', y='成功率', markers=True, 
+                                   labels={'成功率': '成功率 (%)'}, title=f"{sel_cat} 進步趨勢")
+                st.plotly_chart(fig_line, use_container_width=True)
+            else:
+                st.info("尚無足夠數據。")
+
+    # 2. 右半邊：全隊短板分析
     with col_team:
         st.markdown("#### 全隊技術短板分析")
         
@@ -428,7 +470,6 @@ import plotly.express as px
         """)
         
         if not team_stats.empty:
-            # 轉換中文標籤
             team_stats['技術類別'] = team_stats['cat'].apply(lambda x: CAT_MAP.get(x, x))
             team_stats['成功率(%)'] = team_stats['rate'].round(1)
             plot_df = team_stats.sort_values(by='成功率(%)', ascending=True)
@@ -441,24 +482,21 @@ import plotly.express as px
                 orientation='h',
                 text="成功率(%)", 
                 color="成功率(%)",
-                color_continuous_scale='Blues', 
+                color_continuous_scale='Blues', # 維持藍色配色
                 range_x=[0, 100],
-                # 【顏色救星】：強制將色階對應到 0-100，這樣 60% 的防守就不會太淺
-                range_color=[0, 100] 
+                range_color=[0, 100] # 強制色階範圍 0-100，解決防守顏色太淺問題
             )
             
-            # 美化版面
             fig_bar.update_layout(
                 showlegend=False, 
                 xaxis_title="", 
                 yaxis_title="", 
                 height=400,
-                margin=dict(l=20, r=20, t=30, b=20),
-                coloraxis_showscale=False # 隱藏側邊顏色條
+                coloraxis_showscale=False # 隱藏右側顏色尺規，畫面更乾淨
             )
-            fig_bar.update_traces(textposition='outside', textfont_size=14)
+            fig_bar.update_traces(textposition='outside')
             
             st.plotly_chart(fig_bar, use_container_width=True)
-            st.info("💡 橫條越短、顏色越淺的項目，代表是球隊目前的薄弱環節。")
+            st.info("💡 橫條越短、顏色越淺代表該技術目前越薄弱，需加強訓練。")
         else:
             st.info("尚無全隊統計數據。")
