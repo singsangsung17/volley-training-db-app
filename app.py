@@ -409,17 +409,23 @@ with tab4:
                     st.success("數據已成功錄入")
                     st.rerun()
                 
-# ---- Tab 5: Analytics (橫式圖表與中文優化) ----
+# ---- Tab 5: Analytics (視覺徹底修復版) ----
 with tab5:
     st.subheader("數據戰報與進步趨勢")
     
-    col_trend, col_team = st.columns([1, 1])
+    # 建立中文映射字典，防止資料庫出現英文標籤
+    CAT_MAP = {
+        "attack": "攻擊", "defense": "防守", "serve": "發球", 
+        "set": "舉球", "receive": "接發", "block": "攔網",
+        "attack_chain": "攻擊鏈", "serve_receive": "接發球"
+    }
 
-    # 1. 左欄：個人進步曲線 (保持折線圖)
+    col_trend, col_team = st.columns([1, 1.2])
+
+    # 1. 左欄：個人技術成長曲線
     with col_trend:
         st.markdown("#### 個人技術成長曲線")
         p_data = df(con, "SELECT player_id, name FROM players ORDER BY name;")
-        c_options = ["攻擊", "接發", "防守", "發球", "舉球", "攔網"]
         
         if not p_data.empty:
             c1, c2 = st.columns(2)
@@ -427,70 +433,72 @@ with tab5:
                 sel_p_id = st.selectbox("選擇球員", options=p_data['player_id'], 
                                         format_func=lambda x: p_data[p_data['player_id']==x]['name'].values[0], key="ana_p")
             with c2:
-                sel_cat = st.selectbox("選擇技術類別", options=c_options, key="ana_cat")
+                # 這裡的選項也改為中文
+                c_options = ["攻擊", "接發", "防守", "發球", "舉球", "攔網"]
+                sel_cat = st.selectbox("技術類別", options=c_options, key="ana_cat")
 
             trend_df = df(con, """
                 SELECT 
                     strftime('%Y-%m-%d', s.session_date) AS 日期,
-                    SUM(r.success_count) AS 總成功,
-                    SUM(r.total_count) AS 總嘗試
+                    SUM(r.success_count) AS 成功,
+                    SUM(r.total_count) AS 總次數
                 FROM drill_results r
                 JOIN sessions s ON s.session_id = r.session_id
                 JOIN drills d ON d.drill_id = r.drill_id
-                WHERE r.player_id = ? AND d.category = ?
-                GROUP BY 日期
-                ORDER BY 日期 ASC
-            """, (int(sel_p_id), sel_cat))
+                WHERE r.player_id = ? AND (d.category = ? OR d.drill_name LIKE '%' || ? || '%')
+                GROUP BY 日期 ORDER BY 日期 ASC
+            """, (int(sel_p_id), sel_cat, sel_cat))
 
-            if not trend_df.empty and trend_df['總嘗試'].sum() > 0:
-                trend_df['成功率'] = (trend_df['總成功'] / trend_df['總嘗試']) * 100
+            if not trend_df.empty:
+                trend_df['成功率'] = (trend_df['成功'] / trend_df['總次數'] * 100).round(1)
                 st.line_chart(trend_df.set_index('日期')['成功率'])
             else:
-                st.info("尚無數據產生曲線。")
+                st.info("尚無足夠數據產生曲線。")
 
-    # 2. 右欄：全隊技術短板分析 (改為橫式 + 中文)
+    # 2. 右欄：全隊技術短板分析 (徹底修正座標與格式)
     with col_team:
         st.markdown("#### 全隊技術短板分析")
         
         team_stats = df(con, """
             SELECT 
-                d.category AS 技術類別,
-                CAST(SUM(r.success_count) AS FLOAT) / SUM(r.total_count) * 100 AS 成功率
+                d.category AS cat,
+                CAST(SUM(r.success_count) AS FLOAT) / SUM(r.total_count) * 100 AS rate
             FROM drill_results r
             JOIN drills d ON d.drill_id = r.drill_id
             WHERE d.category != 'summary' AND r.total_count > 0
             GROUP BY d.category
-            ORDER BY 成功率 ASC; -- 由低到高排，最短的板在最上面
         """)
         
         if not team_stats.empty:
-            # 使用 st.bar_chart 的 horizontal 參數
-            # x 軸放成功率，y 軸放技術類別
+            # 【關鍵修復 1】：將英文分類轉換為中文顯示
+            team_stats['技術類別'] = team_stats['cat'].apply(lambda x: CAT_MAP.get(x, x))
+            # 【關鍵修復 2】：將成功率四捨五入到小數第一位
+            team_stats['成功率(%)'] = team_stats['rate'].round(1)
+            
+            # 排序：成功率由低到高（短板在最上面）
+            plot_df = team_stats[['技術類別', '成功率(%)']].sort_values(by='成功率(%)', ascending=True)
+
+            # 【關鍵修復 3】：使用明確的 x, y 定義橫式圖表
             st.bar_chart(
-                team_stats, 
-                x="成功率", 
+                plot_df, 
+                x="成功率(%)", 
                 y="技術類別", 
                 horizontal=True,
                 use_container_width=True
             )
-            st.write("💡 **教練分析**：橫條越短的項目，代表全隊目前的表現越不穩定，建議增加相關項目的訓練比例。")
+            st.info("💡 橫條越短代表該項技術越薄弱，需加強訓練。")
         else:
-            st.info("尚無統計數據。")
+            st.info("尚無全隊統計數據。")
 
     st.divider()
 
-    # 3. 下方：失誤排行 (中文標籤化)
-    with st.expander("查看全隊常見失誤排行榜"):
-        error_df = df(con, """
-            SELECT 
-                error_type AS 失誤原因,
-                COUNT(*) AS 出現次數
+    # 3. 下方：失誤排行
+    with st.expander("查看全隊常見失誤分析"):
+        err_stats = df(con, """
+            SELECT error_type AS 原因, COUNT(*) AS 次數 
             FROM drill_results 
             WHERE error_type != '無' AND error_type IS NOT NULL
-            GROUP BY error_type
-            ORDER BY 出現次數 DESC;
+            GROUP BY 原因 ORDER BY 次數 DESC LIMIT 5;
         """)
-        if not error_df.empty:
-            st.dataframe(error_df, use_container_width=True, hide_index=True)
-        else:
-            st.write("目前尚無失誤紀錄。")
+        if not err_stats.empty:
+            st.table(err_stats) # 使用 table 更簡潔
