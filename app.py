@@ -12,7 +12,8 @@ DB_PATH = os.path.join(APP_DIR, "volley_training.db")
 SCHEMA_PATH = os.path.join(APP_DIR, "schema.sql")
 SEED_PATH = os.path.join(APP_DIR, "seed_data.sql")
 
-st.set_page_config(page_title="排球訓練知識庫（最小可用版）", layout="wide")
+# 修改前：st.set_page_config(page_title="排球訓練知識庫（最小可用版）", ...)
+st.set_page_config(page_title="VolleyData | 排球科學化管理系統", layout="wide")
 # 統一全域按鈕顏色為綠色
 st.markdown("""
 <style>
@@ -80,7 +81,8 @@ def detect_drills_text_col(con) -> str:
 DRILLS_TEXT_COL = detect_drills_text_col(con)  # 後續統一用這個欄位名
 
 
-st.title("排球訓練知識庫（SQLite + Streamlit 最小可用版）")
+# 修改前：st.title("排球訓練知識庫（SQLite + Streamlit 最小可用版）")
+st.title("排球訓練科學化管理與數據分析系統")
 st.caption("用途：把 ERD/SQL 附錄變成真的能用的系統。你可以新增球員/訓練/訓練項目，並記錄成效；右側提供常見統計查詢。")
 
 import traceback
