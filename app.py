@@ -39,6 +39,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+
 def connect():
     con = sqlite3.connect(DB_PATH, check_same_thread=False)
     con.execute("PRAGMA foreign_keys = ON;")
@@ -284,15 +285,27 @@ with tab3:
             else:
                 st.warning("尚未為此場次安排任何訓練項目。")
         
-# ---- Tab 4: Results (修正報錯 + 實務點擊器) ----
+# ---- Tab 4: Results (僅放大計數按鈕版) ----
 with tab4:
+    # 這裡的 CSS 只會針對「計數區域」的按鈕進行放大
+    # 我們利用 Streamlit 的 st.markdown 注入一個局部樣式
+    st.markdown("""
+        <style>
+            /* 讓計數區域的按鈕變超大，字體加粗 */
+            .counter-btn > div > button {
+                height: 5em !important;
+                font-size: 24px !important;
+                font-weight: bold !important;
+            }
+        </style>
+    """, unsafe_allow_html=True)
+
     st.subheader("現場數據紀錄")
 
-    # 確保資料即時抓取，避免 NameError
+    # 確保資料即時抓取
     t4_sessions = df(con, "SELECT session_id, session_date, theme FROM sessions ORDER BY session_date DESC;")
     t4_players = df(con, "SELECT player_id, name FROM players ORDER BY name;")
 
-    # 初始化計數器 (暫存在 session_state)
     if 'count_success' not in st.session_state: st.session_state.count_success = 0
     if 'count_total' not in st.session_state: st.session_state.count_total = 0
 
@@ -308,69 +321,77 @@ with tab4:
             p_map = {int(r.player_id): r.name for r in t4_players.itertuples(index=False)}
             pid = st.selectbox("球員", options=list(p_map.keys()), format_func=lambda x: p_map[x], key="t4_pid")
         with c3:
-            # 只顯示該場次安排的項目，並手動定義總結項 ID
-            current_drills = df(con, "SELECT d.drill_id, d.drill_name FROM session_drills sd JOIN drills d ON d.drill_id = sd.drill_id WHERE sd.session_id = ?", (int(sid),))
+            # 過濾掉總結項
+            current_drills = df(con, """
+                SELECT d.drill_id, d.drill_name FROM session_drills sd 
+                JOIN drills d ON d.drill_id = sd.drill_id 
+                WHERE sd.session_id = ? AND d.category != 'summary' AND d.drill_name != '本場次總結'
+            """, (int(sid),))
             d_options = {int(r.drill_id): r.drill_name for r in current_drills.itertuples(index=False)}
             
-            # 確保有總結項
-            sum_row = df(con, "SELECT drill_id FROM drills WHERE category = 'summary' LIMIT 1;")
-            s_drill_id = int(sum_row.iloc[0]['drill_id']) if not sum_row.empty else 1
-            d_options[s_drill_id] = "本場次總結"
-            
-            did = st.selectbox("紀錄項目", options=list(d_options.keys()), format_func=lambda x: d_options[x], key="t4_did")
+            if not d_options:
+                st.warning("此場次尚未安排具體訓練項目。")
+                did = None
+            else:
+                did = st.selectbox("紀錄項目", options=list(d_options.keys()), format_func=lambda x: d_options[x], key="t4_did")
 
         st.divider()
 
-        # --- 核心：省力點擊器 ---
-        st.markdown("#### 即時計數 (看到動作即刻點擊)")
-        click_l, click_r = st.columns(2)
-        with click_l:
-            # 統一綠色按鈕 (CSS 已在全域設定)
-            if st.button("成功 (+1)", use_container_width=True, type="primary"):
-                st.session_state.count_success += 1
-                st.session_state.count_total += 1
-                st.rerun()
-        with click_r:
-            if st.button("失誤 (+1)", use_container_width=True):
-                st.session_state.count_total += 1
-                st.rerun()
+        # --- 核心：計數器按鈕 (被 CSS 放大) ---
+        if did:
+            st.markdown("#### 即時計數")
+            # 我們把按鈕放進一個標記為 counter-btn 的 div 裡 (透過 st.container)
+            counter_area = st.container()
+            with counter_area:
+                # 這裡使用特殊的 CSS 類別
+                st.markdown('<div class="counter-btn">', unsafe_allow_html=True)
+                click_l, click_r = st.columns(2)
+                with click_l:
+                    if st.button("成功 (+1)", use_container_width=True, type="primary"):
+                        st.session_state.count_success += 1
+                        st.session_state.count_total += 1
+                        st.rerun()
+                with click_r:
+                    if st.button("失誤 (+1)", use_container_width=True):
+                        st.session_state.count_total += 1
+                        st.rerun()
+                st.markdown('</div>', unsafe_allow_html=True)
 
-        # 當前進度預覽
-        curr_total = st.session_state.count_total
-        curr_rate = (st.session_state.count_success / curr_total) if curr_total > 0 else 0
-        st.metric("目前累計", f"{st.session_state.count_success} / {curr_total}", f"成功率 {curr_rate:.1%}")
+            # 數據顯示
+            curr_total = st.session_state.count_total
+            curr_rate = (st.session_state.count_success / curr_total) if curr_total > 0 else 0
+            st.metric("目前累計", f"{st.session_state.count_success} / {curr_total}", f"成功率 {curr_rate:.1%}")
 
-        if st.button("清空計數", key="reset_click", use_container_width=True):
-            st.session_state.count_success = 0
-            st.session_state.count_total = 0
-            st.rerun()
-
-        st.divider()
-
-        # --- 正式存檔區 ---
-        with st.form("t4_final_save", clear_on_submit=True):
-            st.markdown("#### 補充資訊並存檔")
-            f1, f2 = st.columns(2)
-            with f1:
-                final_s = st.number_input("確認成功數", value=st.session_state.count_success)
-            with f2:
-                final_t = st.number_input("確認總次數", value=st.session_state.count_total)
-            
-            # 教練在意的是失誤原因的標準化
-            issue = st.selectbox("主要問題標籤", ["無", "腳步不到位", "擊球點錯誤", "觀察判斷遲緩", "溝通喊聲不足", "體能/節奏偏差"])
-            notes = st.text_area("教練點評 / 球員心得", height=80)
-
-            if st.form_submit_button("正式存入資料庫", type="primary", use_container_width=True):
-                exec_one(con, """
-                    INSERT INTO drill_results (session_id, drill_id, player_id, success_count, total_count, error_type, notes)
-                    VALUES (?, ?, ?, ?, ?, ?, ?);
-                """, (int(sid), int(did), int(pid), int(final_s), int(final_t), issue, notes))
-                
-                # 重置點擊器
+            if st.button("清空計數", key="reset_click", use_container_width=True):
                 st.session_state.count_success = 0
                 st.session_state.count_total = 0
-                st.success("數據已正式紀錄")
                 st.rerun()
+
+            st.divider()
+
+            # --- 正式存檔區 (這裡按鈕會是正常大小) ---
+            with st.form("t4_final_save", clear_on_submit=True):
+                st.markdown("#### 補充資訊並存檔")
+                f1, f2 = st.columns(2)
+                with f1:
+                    final_s = st.number_input("確認成功數", value=st.session_state.count_success)
+                with f2:
+                    final_t = st.number_input("確認總次數", value=st.session_state.count_total)
+                
+                issue = st.selectbox("主要問題", ["無", "腳步不到位", "擊球點錯誤", "觀察判斷遲緩", "溝通喊聲不足"])
+                notes = st.text_area("備註", height=80)
+
+                # 此按鈕不會被前面的 CSS 影響，維持標準大小
+                if st.form_submit_button("正式存入資料庫", type="primary", use_container_width=True):
+                    exec_one(con, """
+                        INSERT INTO drill_results (session_id, drill_id, player_id, success_count, total_count, error_type, notes)
+                        VALUES (?, ?, ?, ?, ?, ?, ?);
+                    """, (int(sid), int(did), int(pid), int(final_s), int(final_t), issue, notes))
+                    
+                    st.session_state.count_success = 0
+                    st.session_state.count_total = 0
+                    st.success("數據已正式紀錄")
+                    st.rerun()
                 
 # ---- Tab 5: Analytics ----
 with tab5:
