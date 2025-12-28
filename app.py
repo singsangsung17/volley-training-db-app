@@ -433,147 +433,97 @@ with tab4:
                     st.rerun()
                 
 
-# ---- Tab 5: Analytics (專業數據戰報版) ----
+# ---- Tab 5: Analytics (專業數據戰略分析版) ----
 with tab5:
     st.subheader("排球戰略分析儀表板")
     
-    # 1. 頂層：全隊 KPI 概覽
-    total_stats = df(con, "SELECT SUM(success_count) as s, SUM(total_count) as t FROM drill_results;")
-    if not total_stats.empty and total_stats['t'].iloc[0] > 0:
-        k1, k2, k3 = st.columns(3)
-        avg_rate = (total_stats['s'].iloc[0] / total_stats['t'].iloc[0] * 100).round(1)
-        k1.metric("全隊平均成功率", f"{avg_rate}%")
-        k2.metric("累計訓練擊球數", f"{int(total_stats['t'].iloc[0])} 顆")
-        
-        # 找出今日失誤最多的類型
-        common_err = df(con, "SELECT error_type, COUNT(*) as c FROM drill_results WHERE error_type != '無' GROUP BY error_type ORDER BY c DESC LIMIT 1;")
-        if not common_err.empty:
-            k3.metric("首要改進環節", common_err['error_type'].iloc[0])
-
-    st.divider()
-
-    # 2. 中層：球員雷達圖 與 失誤佔比
-    c_radar, c_pie = st.columns([1, 1])
-    
-    with c_radar:
-        st.markdown("#### 球員個人技術雷達圖")
-        p_list = df(con, "SELECT player_id, name FROM players;")
-        if not p_list.empty:
-            sel_p = st.selectbox("選擇分析球員", options=p_list['player_id'], 
-                                 format_func=lambda x: p_list[p_list['player_id']==x]['name'].values[0], key="radar_sel")
-            
-            # 獲取球員在各類別的成功率
-            radar_data = df(con, """
-                SELECT d.category, CAST(SUM(r.success_count) AS FLOAT)/SUM(r.total_count)*100 as rate
-                FROM drill_results r JOIN drills d ON d.drill_id = r.drill_id
-                WHERE r.player_id = ? GROUP BY d.category
-            """, (int(sel_p),))
-            
-            if not radar_data.empty:
-                radar_data['類別'] = radar_data['category'].apply(lambda x: CAT_MAP.get(x, x))
-                # 繪製雷達圖
-                fig_radar = px.line_polar(radar_data, r='rate', theta='類別', line_close=True)
-                fig_radar.update_traces(fill='toself', line_color='#28a745') # 配合綠色主題
-                fig_radar.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), showlegend=False)
-                st.plotly_chart(fig_radar, use_container_width=True)
-
-    with c_pie:
-        st.markdown("#### 全隊失誤成因佔比")
-        pie_data = df(con, "SELECT error_type, COUNT(*) as count FROM drill_results WHERE error_type != '無' GROUP BY error_type")
-        if not pie_data.empty:
-            fig_pie = px.pie(pie_data, values='count', names='error_type', hole=0.4,
-                             color_discrete_sequence=px.colors.sequential.Blues_r)
-            fig_pie.update_layout(showlegend=True, margin=dict(l=20, r=20, t=20, b=20))
-            st.plotly_chart(fig_pie, use_container_width=True)
-        else:
-            st.info("尚無足夠的失誤數據可供分析。")
-
-    st.divider()
-
-    # 3. 底層：全隊技術短板監控 (保留原有的橫式 Plotly 圖表)
-    st.markdown("#### 全隊技術短板監控 (0-100%)")
-    # 中文映射，確保圖表顯示中文
+    # 0. 基礎中文映射字典
     CAT_MAP = {
         "attack": "攻擊", "defense": "防守", "serve": "發球", 
         "set": "舉球", "receive": "接發", "block": "攔網",
         "attack_chain": "攻擊鏈", "serve_receive": "接發球"
     }
 
-    col_trend, col_team = st.columns([1, 1.2])
-
-    # 1. 左半邊：個人趨勢
-    with col_trend:
-        st.markdown("#### 個人技術成長曲線")
-        p_data = df(con, "SELECT player_id, name FROM players ORDER BY name;")
+    # 1. 頂層：全隊關鍵績效指標 (KPI)
+    # 計算全隊總數據
+    total_stats = df(con, "SELECT SUM(success_count) as s, SUM(total_count) as t FROM drill_results;")
+    if not total_stats.empty and total_stats['t'].iloc[0] > 0:
+        k1, k2, k3 = st.columns(3)
+        total_s = total_stats['s'].iloc[0]
+        total_t = total_stats['t'].iloc[0]
+        avg_rate = (total_s / total_t * 100).round(1)
         
-        if not p_data.empty:
-            c1, c2 = st.columns(2)
-            with c1:
-                sel_p_id = st.selectbox("選擇球員", options=p_data['player_id'], 
-                                        format_func=lambda x: p_data[p_data['player_id']==x]['name'].values[0], key="ana_p")
-            with c2:
-                c_options = ["攻擊", "接發", "防守", "發球", "舉球", "攔網"]
-                sel_cat = st.selectbox("技術類別", options=c_options, key="ana_cat")
+        k1.metric("全隊總平均成功率", f"{avg_rate}%")
+        k2.metric("累計訓練總擊球數", f"{int(total_t)} 顆")
+        
+        # 找出全隊最常見的失誤原因
+        top_err = df(con, "SELECT error_type, COUNT(*) as c FROM drill_results WHERE error_type != '無' GROUP BY error_type ORDER BY c DESC LIMIT 1;")
+        if not top_err.empty:
+            k3.metric("最需優化環節", top_err['error_type'].iloc[0])
+    
+    st.divider()
 
-            trend_df = df(con, """
-                SELECT strftime('%Y-%m-%d', s.session_date) AS 日期,
-                       SUM(r.success_count) AS 成功, SUM(r.total_count) AS 總次數
-                FROM drill_results r
-                JOIN sessions s ON s.session_id = r.session_id
-                JOIN drills d ON d.drill_id = r.drill_id
-                WHERE r.player_id = ? AND (d.category = ? OR d.drill_name LIKE '%' || ? || '%')
-                GROUP BY 日期 ORDER BY 日期 ASC
-            """, (int(sel_p_id), sel_cat, sel_cat))
-
-            if not trend_df.empty:
-                trend_df['成功率'] = (trend_df['成功'] / trend_df['總次數'] * 100).round(1)
-                fig_line = px.line(trend_df, x='日期', y='成功率', markers=True, 
-                                   labels={'成功率': '成功率 (%)'}, title=f"{sel_cat} 進步趨勢")
-                st.plotly_chart(fig_line, use_container_width=True)
+    # 2. 中層：球員雷達圖 與 失誤佔比
+    col_radar, col_pie = st.columns([1, 1])
+    
+    with col_radar:
+        st.markdown("#### 個人技術五角雷達圖")
+        p_list = df(con, "SELECT player_id, name FROM players ORDER BY name;")
+        if not p_list.empty:
+            sel_p = st.selectbox("分析球員", options=p_list['player_id'], 
+                                 format_func=lambda x: p_list[p_list['player_id']==x]['name'].values[0], key="ana_radar_p")
+            
+            # 抓取該球員各類別的成功率
+            radar_raw = df(con, """
+                SELECT d.category, CAST(SUM(r.success_count) AS FLOAT) / SUM(r.total_count) * 100 as rate
+                FROM drill_results r JOIN drills d ON d.drill_id = r.drill_id
+                WHERE r.player_id = ? AND d.category != 'summary'
+                GROUP BY d.category
+            """, (int(sel_p),))
+            
+            if not radar_raw.empty:
+                radar_raw['技術項目'] = radar_raw['category'].apply(lambda x: CAT_MAP.get(x, x))
+                # 繪製雷達圖
+                fig_radar = px.line_polar(radar_raw, r='rate', theta='技術項目', line_close=True)
+                fig_radar.update_traces(fill='toself', line_color='#28a745') # 使用你設定的綠色主題
+                fig_radar.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), showlegend=False)
+                st.plotly_chart(fig_radar, use_container_width=True)
             else:
-                st.info("尚無足夠數據。")
+                st.info("該球員尚無足夠數據產生雷達圖。")
 
-    # 2. 右半邊：全隊短板分析
-    with col_team:
-        st.markdown("#### 全隊技術短板分析")
-        
-        team_stats = df(con, """
-            SELECT d.category AS cat,
-                   CAST(SUM(r.success_count) AS FLOAT) / SUM(r.total_count) * 100 AS rate
-            FROM drill_results r
-            JOIN drills d ON d.drill_id = r.drill_id
-            WHERE d.category != 'summary' AND r.total_count > 0
-            GROUP BY d.category
-        """)
-        
-        if not team_stats.empty:
-            team_stats['技術類別'] = team_stats['cat'].apply(lambda x: CAT_MAP.get(x, x))
-            team_stats['成功率(%)'] = team_stats['rate'].round(1)
-            plot_df = team_stats.sort_values(by='成功率(%)', ascending=True)
-
-            # 使用 Plotly 畫圖
-            fig_bar = px.bar(
-                plot_df, 
-                x="成功率(%)", 
-                y="技術類別", 
-                orientation='h',
-                text="成功率(%)", 
-                color="成功率(%)",
-                color_continuous_scale='Blues', # 維持藍色配色
-                range_x=[0, 100],
-                range_color=[0, 100] # 強制色階範圍 0-100，解決防守顏色太淺問題
-            )
-            
-            fig_bar.update_layout(
-                showlegend=False, 
-                xaxis_title="", 
-                yaxis_title="", 
-                height=400,
-                coloraxis_showscale=False # 隱藏右側顏色尺規，畫面更乾淨
-            )
-            fig_bar.update_traces(textposition='outside')
-            
-            st.plotly_chart(fig_bar, use_container_width=True)
-            st.info("💡 橫條越短、顏色越淺代表該技術目前越薄弱，需加強訓練。")
+    with col_pie:
+        st.markdown("#### 全隊失誤成因佔比")
+        pie_data = df(con, "SELECT error_type, COUNT(*) as count FROM drill_results WHERE error_type != '無' GROUP BY error_type")
+        if not pie_data.empty:
+            fig_pie = px.pie(pie_data, values='count', names='error_type', hole=0.4,
+                             color_discrete_sequence=px.colors.sequential.Blues_r)
+            fig_pie.update_layout(showlegend=True, margin=dict(l=10, r=10, t=10, b=10))
+            st.plotly_chart(fig_pie, use_container_width=True)
         else:
-            st.info("尚無全隊統計數據。")
+            st.info("尚無失誤紀錄可供分析。")
+
+    st.divider()
+
+    # 3. 底層：全隊技術短板分析 (橫式圖表)
+    st.markdown("#### 全隊各項技術成功率 (0-100%)")
+    team_stats = df(con, """
+        SELECT d.category as cat, CAST(SUM(r.success_count) AS FLOAT) / SUM(r.total_count) * 100 as rate
+        FROM drill_results r JOIN drills d ON d.drill_id = r.drill_id
+        WHERE d.category != 'summary' AND r.total_count > 0
+        GROUP BY d.category
+    """)
+    
+    if not team_stats.empty:
+        team_stats['技術類別'] = team_stats['cat'].apply(lambda x: CAT_MAP.get(x, x))
+        team_stats['成功率(%)'] = team_stats['rate'].round(1)
+        plot_df = team_stats.sort_values(by='成功率(%)', ascending=True)
+
+        fig_bar = px.bar(
+            plot_df, x="成功率(%)", y="技術類別", orientation='h',
+            text="成功率(%)", color="成功率(%)",
+            color_continuous_scale='Blues', range_x=[0, 100], range_color=[0, 100]
+        )
+        fig_bar.update_layout(showlegend=False, coloraxis_showscale=False, xaxis_title="", yaxis_title="", height=350)
+        fig_bar.update_traces(textposition='outside')
+        st.plotly_chart(fig_bar, use_container_width=True)
+        st.info("💡 橫條越短、顏色越淺（如天空藍）代表該項目為目前的球隊短板，建議加強訓練。")
