@@ -411,11 +411,13 @@ with tab4:
                 
 import plotly.express as px  # 確保你在程式碼最上方有 import plotly.express as px
 
-# ---- Tab 5: Analytics (Plotly 專業救命版) ----
+import plotly.express as px
+
+# ---- Tab 5: Analytics (Plotly 專業修復版) ----
 with tab5:
     st.subheader("數據戰報與進步趨勢")
     
-    # 建立中文映射字典
+    # 中文映射字典，確保圖表標籤美觀
     CAT_MAP = {
         "attack": "攻擊", "defense": "防守", "serve": "發球", 
         "set": "舉球", "receive": "接發", "block": "攔網",
@@ -424,24 +426,21 @@ with tab5:
 
     col_trend, col_team = st.columns([1, 1.2])
 
-    # 1. 左欄：個人進步曲線 (保持折線圖，但優化格式)
+    # 1. 左欄：個人成長趨勢
     with col_trend:
         st.markdown("#### 個人技術成長曲線")
         p_data = df(con, "SELECT player_id, name FROM players ORDER BY name;")
-        
         if not p_data.empty:
             c1, c2 = st.columns(2)
             with c1:
                 sel_p_id = st.selectbox("選擇球員", options=p_data['player_id'], 
                                         format_func=lambda x: p_data[p_data['player_id']==x]['name'].values[0], key="ana_p")
             with c2:
-                c_options = ["攻擊", "接發", "防守", "發球", "舉球", "攔網"]
-                sel_cat = st.selectbox("技術類別", options=c_options, key="ana_cat")
+                sel_cat = st.selectbox("技術類別", options=["攻擊", "接發", "防守", "發球", "舉球", "攔網"], key="ana_cat")
 
             trend_df = df(con, """
                 SELECT strftime('%Y-%m-%d', s.session_date) AS 日期,
-                       SUM(r.success_count) AS 成功,
-                       SUM(r.total_count) AS 總次數
+                       SUM(r.success_count) AS 成功, SUM(r.total_count) AS 總次數
                 FROM drill_results r
                 JOIN sessions s ON s.session_id = r.session_id
                 JOIN drills d ON d.drill_id = r.drill_id
@@ -451,17 +450,15 @@ with tab5:
 
             if not trend_df.empty:
                 trend_df['成功率'] = (trend_df['成功'] / trend_df['總次數'] * 100).round(1)
-                # 使用 plotly 畫更漂亮的折線圖
                 fig_line = px.line(trend_df, x='日期', y='成功率', markers=True, 
-                                   labels={'成功率': '成功率 (%)'}, title=f"{sel_cat} 進步趨勢")
+                                   labels={'成功率': '成功率 (%)'}, title=f"{sel_cat} 趨勢")
                 st.plotly_chart(fig_line, use_container_width=True)
             else:
-                st.info("尚無足夠數據。")
+                st.info("尚無足夠數據產生曲線。")
 
-    # 2. 右欄：全隊技術短板分析 (使用 Plotly 徹底修復)
+    # 2. 右欄：全隊技術短板 (橫式圖表)
     with col_team:
         st.markdown("#### 全隊技術短板分析")
-        
         team_stats = df(con, """
             SELECT d.category AS cat,
                    CAST(SUM(r.success_count) AS FLOAT) / SUM(r.total_count) * 100 AS rate
@@ -476,29 +473,14 @@ with tab5:
             team_stats['成功率(%)'] = team_stats['rate'].round(1)
             plot_df = team_stats.sort_values(by='成功率(%)', ascending=True)
 
-            # 【救命關鍵】：使用 Plotly Express 繪製真正的橫向條形圖
+            # 使用 Plotly 畫橫向條形圖
             fig_bar = px.bar(
-                plot_df, 
-                x="成功率(%)", 
-                y="技術類別", 
-                orientation='h',
-                text="成功率(%)", # 直接在條形圖上顯示數字
-                color="成功率(%)",
-                color_continuous_scale='Blues', # 使用藍色漸層，視覺更專業
-                range_x=[0, 100] # 強制 X 軸從 0 到 100，不會亂跳
+                plot_df, x="成功率(%)", y="技術類別", orientation='h',
+                text="成功率(%)", color="成功率(%)",
+                color_continuous_scale='Blues', range_x=[0, 100]
             )
-            
-            # 優化圖表佈局
-            fig_bar.update_layout(
-                showlegend=False,
-                xaxis_title="成功率 (%)",
-                yaxis_title="",
-                height=400,
-                margin=dict(l=20, r=20, t=20, b=20)
-            )
-            fig_bar.update_traces(textposition='outside') # 讓數字顯示在條形外面
-
+            fig_bar.update_layout(showlegend=False, xaxis_title="成功率 (%)", yaxis_title="", height=400)
+            fig_bar.update_traces(textposition='outside')
             st.plotly_chart(fig_bar, use_container_width=True)
-            st.info("💡 橫條越短代表該項技術越薄弱，需加強訓練。")
         else:
             st.info("尚無全隊統計數據。")
