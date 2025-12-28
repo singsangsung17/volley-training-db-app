@@ -127,51 +127,51 @@ with tab1:
 )
 
 
-# ---- Tab 2: Drills (移除目的，改成人數需求) ----
+# ---- Tab 2: Drills (修正過濾「本場次總結」與人數顯示) ----
 with tab2:
     colL, colR = st.columns([1, 1])
 
     with colL:
         st.markdown("#### 新增訓練項目")
-        
         drill_name = st.text_input("訓練項目名稱", key="d_name")
-
-        # 1. 分類選擇
+        
+        # 分類選擇
         CATEGORY_OPTIONS = ["攻擊", "接發", "防守", "發球", "舉球", "攔網", "綜合"]
         category = st.selectbox("分類", options=CATEGORY_OPTIONS, key="d_category")
 
-        # 2. 人數需求（取代原本的目的）
+        # 人數需求
         num_people = st.number_input("建議人數", min_value=1, value=6, step=1, key="d_people")
         people_display = f"{num_people}人以上"
         st.info(f"目前設定：{people_display}")
 
-        # 3. 難易度拉桿
         difficulty = st.slider("難度（1-5）", 1, 5, 3, key="d_diff")
 
-        # 4. 新增按鈕
         if st.button("新增訓練項目", key="d_add"):
             _name = (drill_name or "").strip()
-
             if not _name:
                 st.error("訓練項目名稱不可為空。")
             else:
-                # 我們把 "X人以上" 存入原本的 DRILLS_TEXT_COL (purpose 欄位)
                 exec_one(
                     con,
                     f"INSERT INTO drills (drill_name, {DRILLS_TEXT_COL}, category, difficulty) VALUES (?, ?, ?, ?);",
                     (_name, people_display, (category or "").strip(), int(difficulty)),
                 )
-                st.success(f"已新增項目：{_name} ({people_display})")
+                st.success(f"已新增項目：{_name}")
                 st.rerun()
 
     with colR:
         st.markdown("#### 訓練項目列表")
+        # 這裡加入 WHERE 來過濾掉 summary，並用 CASE 處理舊資料顯示問題
         st.dataframe(
             df(con, f"""
                 SELECT 
                     difficulty AS 難度,
                     drill_name AS 訓練項目,
-                    {DRILLS_TEXT_COL} AS 人數需求,
+                    -- 如果原本存的是說明文字而不是「X人以上」，表格顯示「未設定」
+                    CASE 
+                        WHEN {DRILLS_TEXT_COL} LIKE '%人以上' THEN {DRILLS_TEXT_COL}
+                        ELSE '未設定 (舊資料)' 
+                    END AS 人數需求,
                     CASE 
                         WHEN category IN ('攻擊','接發','防守','發球','舉球','攔網','綜合') THEN category
                         WHEN category = 'attack_chain' THEN '攻擊'
@@ -180,9 +180,10 @@ with tab2:
                         WHEN category = 'serve' THEN '發球'
                         WHEN category IN ('set','setting') THEN '舉球'
                         WHEN category IN ('block','blocking') THEN '攔網'
-                        ELSE category 
+                        ELSE COALESCE(category, '')
                     END AS 類別
                 FROM drills 
+                WHERE category != 'summary' AND drill_name != '本場次總結' -- 這裡過濾掉系統用的總結項
                 ORDER BY created_at DESC;
             """),
             use_container_width=True,
