@@ -409,129 +409,91 @@ with tab4:
                     st.success("數據已成功錄入")
                     st.rerun()
                 
-# ---- Tab 5: Analytics ----
+# ---- Tab 5: Analytics (數據視覺化與 SQL 進階分析) ----
 with tab5:
-    st.markdown("#### 分析（對應附錄 SQL 範例）")
-    colA, colB = st.columns(2)
+    st.subheader("數據戰報與進步趨勢")
+    
+    # 建立兩欄：左邊選球員看趨勢，右邊看全隊分析
+    col_trend, col_team = st.columns([1, 1])
 
-    # ===== 左欄：1 + 3 =====
-    with colA:
-        st.markdown("**1) 近 4 週每位球員訓練量**")
-        st.dataframe(
-            df(con, """
-                SELECT
-                    p.name AS 球員,
-                    COUNT(DISTINCT r.session_id) AS 近四週場次數,
-                    SUM(r.total_count) AS 近四週總動作數
+    # 1. 左欄：個人進步曲線
+    with col_trend:
+        st.markdown("#### 個人進步曲線")
+        
+        # 抓取球員與類別清單
+        p_data = df(con, "SELECT player_id, name FROM players ORDER BY name;")
+        c_options = ["攻擊", "接發", "防守", "發球", "舉球", "攔網"]
+        
+        if not p_data.empty:
+            c1, c2 = st.columns(2)
+            with c1:
+                sel_p_id = st.selectbox("選擇球員", options=p_data['player_id'], 
+                                        format_func=lambda x: p_data[p_data['player_id']==x]['name'].values[0], key="ana_p")
+            with c2:
+                sel_cat = st.selectbox("選擇技術類別", options=c_options, key="ana_cat")
+
+            # SQL 邏輯：按週計算該球員在該類別的平均成功率
+            # 成功率公式： $$成功率 = \frac{\sum 成功次數}{\sum 總次數} \times 100\%$$
+            trend_df = df(con, """
+                SELECT 
+                    strftime('%Y-%m-%d', s.session_date) AS 日期,
+                    SUM(r.success_count) AS 總成功,
+                    SUM(r.total_count) AS 總嘗試
                 FROM drill_results r
-                JOIN players p ON p.player_id = r.player_id
                 JOIN sessions s ON s.session_id = r.session_id
-                WHERE s.session_date >= date('now','-28 day')
-                GROUP BY p.name
-                ORDER BY 近四週總動作數 DESC;
-            """),
-            use_container_width=True,
-            hide_index=True
-        )
-
-        st.markdown("**3) 指定球員 × 指定訓練項目的週別進步趨勢**")
-
-        players = df(con, "SELECT player_id, name FROM players ORDER BY name;")
-        drills = df(con, "SELECT drill_id, drill_name FROM drills ORDER BY drill_name;")
-
-        pid_list = players["player_id"].astype(int).tolist()
-        pid_map = {int(r.player_id): r.name for r in players.itertuples(index=False)}
-
-        did_list = drills["drill_id"].astype(int).tolist()
-        did_map = {int(r.drill_id): r.drill_name for r in drills.itertuples(index=False)}
-
-        pid = st.selectbox(
-            "選擇球員",
-            options=pid_list,
-            format_func=lambda x: pid_map.get(int(x), ""),
-            key="a_pid"
-        )
-        did = st.selectbox(
-            "選擇訓練項目",
-            options=did_list,
-            format_func=lambda x: did_map.get(int(x), ""),
-            key="a_did"
-        )
-
-        trend = df(con, """
-            SELECT
-                strftime('%Y-%W', s.session_date) AS 週別,
-                printf('%.1f%%', 100.0 * SUM(r.success_count) / NULLIF(SUM(r.total_count), 0)) AS 成功率,
-                SUM(r.total_count) AS 總動作數
-            FROM drill_results r
-            JOIN sessions s ON s.session_id = r.session_id
-            WHERE r.player_id = ?
-              AND r.drill_id = ?
-            GROUP BY strftime('%Y-%W', s.session_date)
-            ORDER BY 週別 ASC;
-        """, (int(pid), int(did)))
-
-        st.dataframe(trend, use_container_width=True, hide_index=True)
-
-    # ===== 右欄：2 + 4 + 5 =====
-    with colB:
-        st.markdown("**2) 成功率最低的訓練項目（至少 30 次）**")
-        st.dataframe(
-            df(con, """
-                SELECT
-                    d.drill_name AS 訓練項目,
-                    CASE
-                        WHEN d.category IN ('攻擊','接發','防守','發球','舉球','攔網','綜合') THEN d.category
-                        WHEN d.category = 'attack_chain' THEN '攻擊'
-                        WHEN d.category = 'serve_receive' THEN '接發'
-                        WHEN d.category = 'defense' THEN '防守'
-                        WHEN d.category = 'serve' THEN '發球'
-                        WHEN d.category IN ('set','setting') THEN '舉球'
-                        WHEN d.category IN ('block','blocking') THEN '攔網'
-                        WHEN d.category IN ('all','mix','mixed','comprehensive','summary') THEN '綜合'
-                        ELSE COALESCE(d.category, '')
-                    END AS 類別,
-                    printf('%.1f%%', 100.0 * SUM(r.success_count) / NULLIF(SUM(r.total_count), 0)) AS 成功率,
-                    SUM(r.total_count) AS 總動作數
-                FROM drill_results r
                 JOIN drills d ON d.drill_id = r.drill_id
-                GROUP BY d.drill_name, 類別
-                HAVING SUM(r.total_count) >= 30
-                ORDER BY 100.0 * SUM(r.success_count) / NULLIF(SUM(r.total_count), 0) ASC;
-            """),
-            use_container_width=True,
-            hide_index=True
-        )
+                WHERE r.player_id = ? AND d.category = ?
+                GROUP BY 日期
+                ORDER BY 日期 ASC
+            """, (int(sel_p_id), sel_cat))
 
-        st.markdown("**4) 依訓練主題（主題）統計整體表現**")
+            if not trend_df.empty and trend_df['總嘗試'].sum() > 0:
+                trend_df['成功率'] = (trend_df['總成功'] / trend_df['總嘗試']) * 100
+                
+                # 使用 Streamlit 內建折線圖
+                st.line_chart(trend_df.set_index('日期')['成功率'])
+                st.caption(f"此圖顯示該球員在 {sel_cat} 項目隨時間的成長走勢")
+            else:
+                st.info("尚無足夠數據產生曲線。")
+
+    # 2. 右欄：全隊技術表現分析
+    with col_team:
+        st.markdown("#### 全隊技術短板分析")
+        
+        team_stats = df(con, """
+            SELECT 
+                d.category AS 技術類別,
+                printf('%.1f', 100.0 * SUM(r.success_count) / SUM(r.total_count)) AS 平均成功率
+            FROM drill_results r
+            JOIN drills d ON d.drill_id = r.drill_id
+            WHERE d.category != 'summary' AND r.total_count > 0
+            GROUP BY d.category
+            ORDER BY 平均成功率 ASC;
+        """)
+        
+        if not team_stats.empty:
+            # 將成功率轉為數字以便繪圖
+            team_stats['平均成功率'] = team_stats['平均成功率'].astype(float)
+            st.bar_chart(team_stats.set_index('技術類別')['平均成功率'])
+            st.write("成功率越低代表該技術是目前球隊最需要加強的環節。")
+        else:
+            st.info("尚無全隊統計數據。")
+
+    st.divider()
+
+    # 3. 下方：原始 SQL 查詢 (保留給想要看細節的時候)
+    with st.expander("查看原始數據查詢"):
+        st.markdown("**失誤類型排行榜**")
         st.dataframe(
             df(con, """
-                SELECT
-                    s.theme AS 主題,
-                    COUNT(DISTINCT s.session_id) AS 場次數,
-                    printf('%.1f%%', 100.0 * SUM(r.success_count) / NULLIF(SUM(r.total_count), 0)) AS 整體成功率,
-                    SUM(r.total_count) AS 總動作數
-                FROM sessions s
-                JOIN drill_results r ON r.session_id = s.session_id
-                GROUP BY s.theme
-                ORDER BY 場次數 DESC;
-            """),
-            use_container_width=True,
-            hide_index=True
-        )
-
-        st.markdown("**5) 失誤類型排行榜**")
-        st.dataframe(
-            df(con, """
-                SELECT
-                    COALESCE(NULLIF(TRIM(r.error_type), ''), '（未填）') AS 失誤類型,
-                    COUNT(*) AS 次數
+                SELECT 
+                    COALESCE(NULLIF(TRIM(r.error_type), ''), '未填寫') AS 失誤原因,
+                    COUNT(*) AS 出現次數
                 FROM drill_results r
-                GROUP BY COALESCE(NULLIF(TRIM(r.error_type), ''), '（未填）')
-                ORDER BY 次數 DESC;
-            """),
-            use_container_width=True,
-            hide_index=True
+                WHERE r.error_type != '無'
+                GROUP BY 失誤原因
+                ORDER BY 出現次數 DESC;
+            """), use_container_width=True, hide_index=True
         )
 
 
