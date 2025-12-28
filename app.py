@@ -41,16 +41,6 @@ def exec_one(con, query: str, params: Tuple = ()):
     con.commit()
 
 con = init_db_if_needed()
-def detect_drills_text_col(con) -> str:
-    cols = df(con, "PRAGMA table_info(drills);")["name"].tolist()
-    if "purpose" in cols:
-        return "purpose"
-    if "objective" in cols:
-        return "objective"
-    raise RuntimeError("drills 表缺少 purpose/objective 欄位，請檢查 schema.sql")
-
-DRILLS_TEXT_COL = detect_drills_text_col(con)  # 後續統一用這個欄位名
-
 
 st.title("排球訓練知識庫（SQLite + Streamlit 最小可用版）")
 st.caption("用途：把 ERD/SQL 附錄變成真的能用的系統。你可以新增球員/訓練/訓練項目，並記錄成效；右側提供常見統計查詢。")
@@ -112,20 +102,8 @@ with tab1:
                 st.success("已新增。")
     with colR:
         st.markdown("#### 球員列表")
-        st.dataframe(
-    df(con, """
-        SELECT
-          name       AS 姓名,
-          position   AS 位置,
-          grade_year AS 年級,
-          created_at AS 建立時間
-        FROM players
-        ORDER BY created_at DESC;
-    """),
-    use_container_width=True,
-    hide_index=True,
-)
-
+        st.dataframe(df(con, "SELECT player_id, name, position, grade_year, created_at FROM players ORDER BY player_id DESC;"),
+                     use_container_width=True, hide_index=True)
 
 # ---- Tab 2: Drills ----
 with tab2:
@@ -135,65 +113,31 @@ with tab2:
         st.markdown("#### 新增訓練項目")
 
         drill_name = st.text_input("訓練項目名稱", key="d_name")
+        purpose = st.text_area("目的（可選）", key="d_purpose", height=90)
 
         # 固定下拉分類（中文）
         CATEGORY_OPTIONS = ["攻擊", "接發", "防守", "發球", "舉球", "攔網", "綜合"]
         category = st.selectbox("分類", options=CATEGORY_OPTIONS, key="d_category")
-
-        # 常用目的模板（依分類）
-        PURPOSE_TEMPLATES = {
-            "攻擊": ["提升擊球點", "加快攻擊節奏", "提升打點選擇", "提升斜線/直線控制"],
-            "接發": ["提升到位率", "穩定平台角度", "提升判斷與移動", "降低失誤率"],
-            "防守": ["提升防守反應", "提升移動與站位", "提升救球品質", "提升二波防守"],
-            "發球": ["提升穩定度", "提升落點控制", "提升破壞性", "降低失誤率"],
-            "舉球": ["提升舉球穩定度", "提升節奏控制", "提升分配判斷", "提升傳球到位"],
-            "攔網": ["提升手型與封網", "提升起跳時機", "提升判斷與移動", "提升連續攔防"],
-            "綜合": ["整合攻防節奏", "提升溝通與配合", "提升臨場決策", "提升整體穩定度"],
-        }
-
-        preset = st.selectbox(
-            "常用目的（可選）",
-            options=["（不使用）"] + PURPOSE_TEMPLATES.get(category, []),
-            key="d_preset"
-        )
-
-        default_purpose = "" if preset == "（不使用）" else preset
-        purpose = st.text_area("目的（可選，可自行修改）", value=default_purpose, key="d_purpose", height=90)
 
         difficulty = st.slider("難度（1-5）", 1, 5, 3, key="d_diff")
 
         if st.button("新增訓練項目", key="d_add"):
             _name = (drill_name or "").strip()
             _purpose = (purpose or "").strip()
+            _category = (category or "").strip()
 
             if not _name:
                 st.error("訓練項目名稱不可為空。")
             else:
                 exec_one(
                     con,
-                    f"INSERT INTO drills (drill_name, {DRILLS_TEXT_COL}, category, difficulty) VALUES (?, ?, ?, ?);",
-                    (_name, _purpose, (category or "").strip(), int(difficulty)),
+                    "INSERT INTO drills (drill_name, purpose, category, difficulty) VALUES (?, ?, ?, ?);",
+                    (_name, _purpose, _category, int(difficulty)),
                 )
                 st.success("已新增。")
 
-    with colR:
-        st.markdown("#### 訓練項目列表（不顯示 id / 難度置前 / 類別中文）")
-        st.dataframe(
-            df(con, """
-                SELECT
-                    difficulty AS 難度,
-                    drill_name AS 訓練項目,
-                    category   AS 類別,
-                    created_at AS 建立時間
-                FROM drills
-                ORDER BY created_at DESC;
-            """),
-            use_container_width=True,
-            hide_index=True
-        )
-
-with colR:
-    st.markdown("#### 訓練項目列表")
+ with colR:
+    st.markdown("#### 訓練項目列表（不顯示 id / 難度置前 / 類別中文）")
 
     st.dataframe(
         df(con, """
@@ -218,6 +162,8 @@ with colR:
         use_container_width=True,
         hide_index=True
     )
+
+
 
 # ---- Tab 3: Sessions ----
 with tab3:
@@ -314,35 +260,9 @@ with tab3:
 
         if selected_session_id is None or drills.empty:
             st.info("先新增至少一個場次與一個訓練項目。")
-       else:
-           drill_ids = drills["drill_id"].astype(int).tolist()
-
-           def _cat_zh(c: str) -> str:
-               c = (c or "").strip()
-               mapping = {
-                   "attack_chain": "攻擊",
-                   "serve_receive": "接發",
-                   "defense": "防守",
-                   "serve": "發球",
-                   "set": "舉球",
-                   "setting": "舉球",
-                   "block": "攔網",
-                   "blocking": "攔網",
-                   "all": "綜合",
-                   "mix": "綜合",
-                   "mixed": "綜合",
-                   "comprehensive": "綜合",
-                   "summary": "綜合",
-              }
-              return c if c in ["攻擊","接發","防守","發球","舉球","攔網","綜合"] else mapping.get(c, c)
-
-
-drill_label_map = {
-    int(r.drill_id): f"{r.drill_name}（{_cat_zh(getattr(r, 'category', ''))}）"
-    for r in drills.itertuples(index=False)
-}
-
-             
+        else:
+            drill_ids = drills["drill_id"].tolist()
+            drill_label_map = {int(r.drill_id): r.drill_name for r in drills.itertuples(index=False)}
 
             selected_drill_id = st.selectbox(
                 "選擇訓練項目",
@@ -410,8 +330,6 @@ drill_label_map = {
             hide_index=True
         )
 
-
-
 # ---- Tab 4: Results ----
 with tab4:
     st.markdown("#### 新增成效記錄（drill_results）")
@@ -424,7 +342,7 @@ with tab4:
     if summary_row.empty:
         exec_one(
             con,
-            f"INSERT INTO drills (drill_name, {DRILLS_TEXT_COL}, category, difficulty) VALUES (?, ?, ?, ?);",
+            "INSERT INTO drills (drill_name, objective, category, difficulty) VALUES (?, ?, ?, ?);",
             ("本場次總結", "場次/個人修正目標與觀察", "summary", 1),
         )
         summary_row = df(con, "SELECT drill_id FROM drills WHERE drill_name = '本場次總結' LIMIT 1;")
@@ -656,47 +574,49 @@ with tab4:
     st.markdown("---")
     st.markdown("#### 成效記錄列表（最近 200 筆）")
     st.dataframe(
-    df(con, """
-        SELECT
-            s.session_date AS 日期,
-            s.theme        AS 場次主題,
-            d.drill_name   AS 訓練項目,
-            p.name         AS 球員,
-            p.position     AS 位置,
-            p.grade_year   AS 年級,
-            r.success_count AS 成功次數,
-            r.total_count   AS 總次數,
-            CASE
-                WHEN r.total_count=0 THEN NULL
-                ELSE printf('%.1f%%', 100.0*r.success_count/r.total_count)
-            END AS 成功率,
-            r.error_type AS 主要修正目標,
-            CASE
-                WHEN r.notes LIKE '[次要修正目標] %' THEN
-                    CASE
-                        WHEN instr(r.notes, char(10)) > 0 THEN
-                            substr(
-                                r.notes,
-                                length('[次要修正目標] ') + 1,
-                                instr(r.notes, char(10)) - (length('[次要修正目標] ') + 1)
-                            )
-                        ELSE
-                            substr(r.notes, length('[次要修正目標] ') + 1)
-                    END
-                ELSE NULL
-            END AS 次要修正目標,
-            r.recorded_at AS 記錄時間,
-            r.notes       AS 備註
-        FROM drill_results r
-        JOIN sessions s ON s.session_id = r.session_id
-        JOIN drills   d ON d.drill_id   = r.drill_id
-        JOIN players  p ON p.player_id  = r.player_id
-        ORDER BY r.recorded_at DESC
-        LIMIT 200;
-    """),
-    use_container_width=True,
-    hide_index=True,
-)
+        df(
+            con,
+            """
+            SELECT
+                r.result_id,
+                s.session_date,
+                s.theme,
+                d.drill_name,
+                p.name AS player_name,
+                p.position,
+                p.grade_year,
+                r.success_count,
+                r.total_count,
+                CASE
+                    WHEN r.total_count=0 THEN NULL
+                    ELSE printf('%.1f%%', 100.0*r.success_count/r.total_count)
+                END AS success_rate,
+
+                r.error_type AS main_target,
+                CASE
+                    WHEN r.notes LIKE '[次要修正目標] %' THEN
+                        CASE
+                            WHEN instr(r.notes, char(10)) > 0 THEN
+                                substr(r.notes, length('[次要修正目標] ') + 1,
+                                       instr(r.notes, char(10)) - (length('[次要修正目標] ') + 1))
+                            ELSE
+                                substr(r.notes, length('[次要修正目標] ') + 1)
+                        END
+                    ELSE NULL
+                END AS secondary_targets,
+                r.recorded_at,
+                r.notes
+            FROM drill_results r
+            JOIN sessions s ON s.session_id = r.session_id
+            JOIN drills   d ON d.drill_id   = r.drill_id
+            JOIN players  p ON p.player_id  = r.player_id
+            ORDER BY r.recorded_at DESC
+            LIMIT 200;
+            """,
+        ),
+        use_container_width=True,
+        hide_index=True,
+    )
 
 
 # ---- Tab 5: Analytics ----
@@ -704,123 +624,80 @@ with tab5:
     st.markdown("#### 分析（對應附錄 SQL 範例）")
     colA, colB = st.columns(2)
 
-    # ===== 左欄：1 + 3 =====
     with colA:
-        st.markdown("**1) 近 4 週每位球員訓練量**")
-        st.dataframe(
-            df(con, """
-                SELECT
-                    p.name AS 球員,
-                    COUNT(DISTINCT r.session_id) AS 近四週場次數,
-                    SUM(r.total_count) AS 近四週總動作數
-                FROM drill_results r
-                JOIN players p ON p.player_id = r.player_id
-                JOIN sessions s ON s.session_id = r.session_id
-                WHERE s.session_date >= date('now','-28 day')
-                GROUP BY p.name
-                ORDER BY 近四週總動作數 DESC;
-            """),
-            use_container_width=True,
-            hide_index=True
-        )
-
-        st.markdown("**3) 指定球員 × 指定訓練項目的週別進步趨勢**")
-
-        players = df(con, "SELECT player_id, name FROM players ORDER BY name;")
-        drills = df(con, "SELECT drill_id, drill_name, category FROM drills ORDER BY drill_name;")
-
-        pid_list = players["player_id"].astype(int).tolist()
-        pid_map = {int(r.player_id): r.name for r in players.itertuples(index=False)}
-
-        did_list = drills["drill_id"].astype(int).tolist()
-        did_map = {int(r.drill_id): r.drill_name for r in drills.itertuples(index=False)}
-
-        pid = st.selectbox(
-            "選擇球員",
-            options=pid_list,
-            format_func=lambda x: pid_map.get(int(x), ""),
-            key="a_pid"
-        )
-        did = st.selectbox(
-            "選擇訓練項目",
-            options=did_list,
-            format_func=lambda x: did_map.get(int(x), ""),
-            key="a_did"
-        )
-
-        trend = df(con, """
+        st.markdown("**1｜近 4 週每位球員訓練量**")
+        st.dataframe(df(con, """
             SELECT
-                strftime('%Y-%W', s.session_date) AS 週別,
-                printf('%.1f%%', 100.0 * SUM(r.success_count) / NULLIF(SUM(r.total_count), 0)) AS 成功率,
-                SUM(r.total_count) AS 總動作數
+              r.player_id,
+              p.name,
+              COUNT(DISTINCT r.session_id) AS sessions_in_last_4w,
+              SUM(r.total_count) AS total_actions
             FROM drill_results r
+            JOIN players p ON p.player_id = r.player_id
             JOIN sessions s ON s.session_id = r.session_id
-            WHERE r.player_id = ?
-              AND r.drill_id = ?
-            GROUP BY strftime('%Y-%W', s.session_date)
-            ORDER BY 週別 ASC;
-        """, (int(pid), int(did)))
+            WHERE s.session_date >= date('now','-28 day')
+            GROUP BY r.player_id, p.name
+            ORDER BY total_actions DESC;
+        """), use_container_width=True, hide_index=True)
 
-        st.dataframe(trend, use_container_width=True, hide_index=True)
+        st.markdown("**3｜指定球員 × 指定 drill 的週別進步趨勢**")
+        players = df(con, "SELECT player_id, name FROM players ORDER BY name;")
+        drills = df(con, "SELECT drill_id, drill_name FROM drills ORDER BY drill_name;")
+        if not players.empty and not drills.empty:
+            pid = st.selectbox("選擇球員", players.apply(lambda r: f"{r.player_id}｜{r.name}", axis=1), key="a_pid")
+            did = st.selectbox("選擇 drill", drills.apply(lambda r: f"{r.drill_id}｜{r.drill_name}", axis=1), key="a_did")
+            pid = int(pid.split("｜")[0])
+            did = int(did.split("｜")[0])
+            trend = df(con, """
+                SELECT
+                  strftime('%Y-%W', s.session_date) AS year_week,
+                  ROUND(1.0 * SUM(r.success_count) / NULLIF(SUM(r.total_count), 0), 3) AS success_rate,
+                  SUM(r.total_count) AS total_actions
+                FROM drill_results r
+                JOIN sessions s ON s.session_id = r.session_id
+                WHERE r.player_id = ?
+                  AND r.drill_id = ?
+                GROUP BY strftime('%Y-%W', s.session_date)
+                ORDER BY year_week ASC;
+            """, (pid, did))
+            st.dataframe(trend, use_container_width=True, hide_index=True)
+        else:
+            st.info("需要先有球員與 drill。")
 
-    # ===== 右欄：2 + 4 + 5 =====
     with colB:
-        st.markdown("**2) 成功率最低的訓練項目（至少 30 次）**")
-        st.dataframe(
-            df(con, """
-                SELECT
-                    d.drill_name AS 訓練項目,
-                    CASE
-                        WHEN d.category IN ('攻擊','接發','防守','發球','舉球','攔網','綜合') THEN d.category
-                        WHEN d.category = 'attack_chain' THEN '攻擊'
-                        WHEN d.category = 'serve_receive' THEN '接發'
-                        WHEN d.category = 'defense' THEN '防守'
-                        WHEN d.category = 'serve' THEN '發球'
-                        WHEN d.category IN ('set','setting') THEN '舉球'
-                        WHEN d.category IN ('block','blocking') THEN '攔網'
-                        WHEN d.category IN ('all','mix','mixed','comprehensive','summary') THEN '綜合'
-                        ELSE COALESCE(d.category, '')
-                    END AS 類別,
-                    printf('%.1f%%', 100.0 * SUM(r.success_count) / NULLIF(SUM(r.total_count), 0)) AS 成功率,
-                    SUM(r.total_count) AS 總動作數
-                FROM drill_results r
-                JOIN drills d ON d.drill_id = r.drill_id
-                GROUP BY d.drill_name, 類別
-                HAVING SUM(r.total_count) >= 30
-                ORDER BY 100.0 * SUM(r.success_count) / NULLIF(SUM(r.total_count), 0) ASC;
-            """),
-            use_container_width=True,
-            hide_index=True
-        )
+        st.markdown("**2｜成功率最低的訓練項目（最低→最高）**")
+        st.dataframe(df(con, """
+            SELECT
+              d.drill_id,
+              d.drill_name,
+              d.category,
+              ROUND(1.0 * SUM(r.success_count) / NULLIF(SUM(r.total_count), 0), 3) AS success_rate,
+              SUM(r.total_count) AS total_actions
+            FROM drill_results r
+            JOIN drills d ON d.drill_id = r.drill_id
+            GROUP BY d.drill_id, d.drill_name, d.category
+            HAVING SUM(r.total_count) >= 30
+            ORDER BY success_rate ASC;
+        """), use_container_width=True, hide_index=True)
 
-        st.markdown("**4) 依訓練主題（主題）統計整體表現**")
-        st.dataframe(
-            df(con, """
-                SELECT
-                    s.theme AS 主題,
-                    COUNT(DISTINCT s.session_id) AS 場次數,
-                    printf('%.1f%%', 100.0 * SUM(r.success_count) / NULLIF(SUM(r.total_count), 0)) AS 整體成功率,
-                    SUM(r.total_count) AS 總動作數
-                FROM sessions s
-                JOIN drill_results r ON r.session_id = s.session_id
-                GROUP BY s.theme
-                ORDER BY 場次數 DESC;
-            """),
-            use_container_width=True,
-            hide_index=True
-        )
+        st.markdown("**4｜依訓練主題（theme）統計整體表現**")
+        st.dataframe(df(con, """
+            SELECT
+              s.theme,
+              COUNT(DISTINCT s.session_id) AS sessions,
+              ROUND(1.0 * SUM(r.success_count) / NULLIF(SUM(r.total_count), 0), 3) AS overall_success_rate
+            FROM sessions s
+            JOIN drill_results r ON r.session_id = s.session_id
+            GROUP BY s.theme
+            ORDER BY sessions DESC;
+        """), use_container_width=True, hide_index=True)
 
-        st.markdown("**5) 失誤類型排行榜**")
-        st.dataframe(
-            df(con, """
-                SELECT
-                    COALESCE(NULLIF(TRIM(r.error_type), ''), '（未填）') AS 失誤類型,
-                    COUNT(*) AS 次數
-                FROM drill_results r
-                GROUP BY COALESCE(NULLIF(TRIM(r.error_type), ''), '（未填）')
-                ORDER BY 次數 DESC;
-            """),
-            use_container_width=True,
-            hide_index=True
-        )
-
+        st.markdown("**5｜失誤類型排行榜**")
+        st.dataframe(df(con, """
+            SELECT
+              COALESCE(NULLIF(TRIM(r.error_type),''), '(未填)') AS error_type,
+              COUNT(*) AS error_events
+            FROM drill_results r
+            GROUP BY COALESCE(NULLIF(TRIM(r.error_type),''), '(未填)')
+            ORDER BY error_events DESC;
+        """), use_container_width=True, hide_index=True)
