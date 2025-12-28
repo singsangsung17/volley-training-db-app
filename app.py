@@ -309,76 +309,78 @@ with tab3:
 
         st.markdown("---")
 
-       # ========== 3) 將訓練項目加入已選場次（id 全部隱藏） ==========
-st.markdown("#### 將訓練項目加入場次（session_drills）")
+        # ========== 3) 將訓練項目加入已選場次（id 全部隱藏） ==========
+        st.markdown("#### 將訓練項目加入場次（session_drills）")
 
-if selected_session_id is None or drills.empty:
-    st.info("先新增至少一個場次與一個訓練項目。")
-else:
-    drill_ids = drills["drill_id"].astype(int).tolist()
+        if selected_session_id is None or drills.empty:
+            st.info("先新增至少一個場次與一個訓練項目。")
+       else:
+           drill_ids = drills["drill_id"].astype(int).tolist()
 
-    def _cat_zh(c: str) -> str:
-        c = (c or "").strip()
-        mapping = {
-            "attack_chain": "攻擊",
-            "serve_receive": "接發",
-            "defense": "防守",
-            "serve": "發球",
-            "set": "舉球",
-            "setting": "舉球",
-            "block": "攔網",
-            "blocking": "攔網",
-            "all": "綜合",
-            "mix": "綜合",
-            "mixed": "綜合",
-            "comprehensive": "綜合",
-            "summary": "綜合",
-        }
-        return c if c in ["攻擊", "接發", "防守", "發球", "舉球", "攔網", "綜合"] else mapping.get(c, c)
+           def _cat_zh(c: str) -> str:
+               c = (c or "").strip()
+               mapping = {
+                   "attack_chain": "攻擊",
+                   "serve_receive": "接發",
+                   "defense": "防守",
+                   "serve": "發球",
+                   "set": "舉球",
+                   "setting": "舉球",
+                   "block": "攔網",
+                   "blocking": "攔網",
+                   "all": "綜合",
+                   "mix": "綜合",
+                   "mixed": "綜合",
+                   "comprehensive": "綜合",
+                   "summary": "綜合",
+              }
+              return c if c in ["攻擊","接發","防守","發球","舉球","攔網","綜合"] else mapping.get(c, c)
 
-    drill_label_map = {
-        int(r.drill_id): f"{r.drill_name}（{_cat_zh(getattr(r, 'category', ''))}）"
-        for r in drills.itertuples(index=False)
-    }
 
-    selected_drill_id = st.selectbox(
-        "選擇訓練項目",
-        options=drill_ids,
-        format_func=lambda did: drill_label_map.get(int(did), str(did)),
-        key="sd_drill_select",
-    )
+drill_label_map = {
+    int(r.drill_id): f"{r.drill_name}（{_cat_zh(getattr(r, 'category', ''))}）"
+    for r in drills.itertuples(index=False)
+}
 
-    # 自動給下一個 sequence_no（仍允許手動改）
-    next_seq = fetch_one(
-        con,
-        "SELECT COALESCE(MAX(sequence_no), 0) + 1 FROM session_drills WHERE session_id=?;",
-        (int(selected_session_id),),
-    )[0]
+             
 
-    sequence_no = st.number_input(
-        "順序（sequence_no）",
-        min_value=1,
-        value=int(next_seq),
-        step=1,
-        key="sd_seq",
-    )
+            selected_drill_id = st.selectbox(
+                "選擇訓練項目",
+                options=drill_ids,
+                format_func=lambda did: drill_label_map.get(int(did), str(did)),
+                key="sd_drill_select",
+            )
 
-    planned_minutes = st.number_input("預計分鐘（可選）", min_value=0, value=20, step=5, key="sd_min")
-    planned_reps = st.number_input("預計次數（可選）", min_value=0, value=50, step=5, key="sd_reps")
+            # 自動給下一個 sequence_no（仍允許手動改）
+            next_seq = fetch_one(
+                con,
+                "SELECT COALESCE(MAX(sequence_no), 0) + 1 FROM session_drills WHERE session_id=?;",
+                (int(selected_session_id),),
+            )[0]
+            sequence_no = st.number_input(
+                "順序（sequence_no）",
+                min_value=1,
+                value=int(next_seq),
+                step=1,
+                key="sd_seq",
+            )
 
-    if st.button("加入場次", key="sd_add"):
-        exec_one(con, """
-            INSERT OR REPLACE INTO session_drills
-            (session_id, drill_id, sequence_no, planned_minutes, planned_reps)
-            VALUES (?, ?, ?, ?, ?);
-        """, (
-            int(selected_session_id),
-            int(selected_drill_id),
-            int(sequence_no),
-            int(planned_minutes),
-            int(planned_reps),
-        ))
-        st.success("已加入/更新。")
+            planned_minutes = st.number_input("預計分鐘（可選）", min_value=0, value=20, step=5, key="sd_min")
+            planned_reps = st.number_input("預計次數（可選）", min_value=0, value=50, step=5, key="sd_reps")
+
+            if st.button("加入場次", key="sd_add"):
+                exec_one(con, """
+                    INSERT OR REPLACE INTO session_drills
+                    (session_id, drill_id, sequence_no, planned_minutes, planned_reps)
+                    VALUES (?, ?, ?, ?, ?);
+                """, (
+                    int(selected_session_id),
+                    int(selected_drill_id),
+                    int(sequence_no),
+                    int(planned_minutes),
+                    int(planned_reps),
+                ))
+                st.success("已加入/更新。")
 
     with colR:
         # ========== 右側列表：id 全部隱藏 ==========
@@ -822,5 +824,3 @@ with tab5:
             hide_index=True
         )
 
-
- 
