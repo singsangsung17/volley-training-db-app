@@ -190,111 +190,99 @@ with tab2:
             hide_index=True
         )
         
-# ---- Tab 3: Sessions (將預計次數改為預計組次，並過濾總結項) ----
+# ---- Tab 3: Sessions (優化：自定義組次、單場顯示、時間統計) ----
 with tab3:
-    def fetch_one(con, sql, params=()):
-        cur = con.cursor()
-        cur.execute(sql, params)
-        row = cur.fetchone()
-        cur.close()
-        return row
-
-    colL, colR = st.columns([1, 1])
+    colL, colR = st.columns([1, 1.2]) # 稍微調寬右側比例
 
     # 1. 抓取場次清單
-    sessions = df(con, """
-        SELECT session_id, session_date, duration_min, theme 
-        FROM sessions 
-        ORDER BY session_date DESC, session_id DESC;
-    """)
+    sessions = df(con, "SELECT session_id, session_date, theme, duration_min FROM sessions ORDER BY session_date DESC, session_id DESC;")
     
-    # 2. 抓取訓練項目清單 (這裡已加入過濾條件，不顯示本場次總結)
-    drills = df(con, """
-        SELECT drill_id, drill_name 
-        FROM drills 
-        WHERE drill_name != '本場次總結' AND category != 'summary'
-        ORDER BY drill_name;
-    """)
+    # 2. 抓取訓練項目 (排除總結項)
+    drills = df(con, "SELECT drill_id, drill_name FROM drills WHERE category != 'summary' ORDER BY drill_name;")
 
     with colL:
         st.markdown("#### 場次操作")
-
         if sessions.empty:
-            st.info("目前沒有場次。請先建立一個場次。")
+            st.info("目前沒有場次。")
             selected_session_id = None
         else:
             session_ids = sessions["session_id"].tolist()
-            session_label_map = {
-                int(r.session_id): f"{r.session_date}｜{r.theme}（{int(r.duration_min)}min）"
-                for r in sessions.itertuples(index=False)
-            }
-            if "selected_session_id" not in st.session_state or st.session_state["selected_session_id"] not in session_label_map:
-                st.session_state["selected_session_id"] = int(session_ids[0])
-
+            session_label_map = {int(r.session_id): f"{r.session_date}｜{r.theme}" for r in sessions.itertuples(index=False)}
+            
+            # 選取目前正在操作的場次
             selected_session_id = st.selectbox(
-                "選擇場次",
+                "選擇操作場次",
                 options=session_ids,
-                index=session_ids.index(st.session_state["selected_session_id"]),
                 format_func=lambda sid: session_label_map.get(int(sid), str(sid)),
-                key="selected_session_id",
+                key="t3_select_sid"
             )
 
-        with st.expander("＋ 建立新場次"):
-            # ... (這部分保持原本的新增場次邏輯，略)
-            pass
-
         st.markdown("---")
-
-        st.markdown("#### 將訓練項目加入場次")
-        if selected_session_id is None or drills.empty:
-            st.info("請先新增至少一個場次與一個訓練項目。")
-        else:
+        st.markdown("#### 將項目加入訓練流程")
+        if selected_session_id and not drills.empty:
             drill_ids = drills["drill_id"].tolist()
             drill_label_map = {int(r.drill_id): r.drill_name for r in drills.itertuples(index=False)}
             
-            selected_drill_id = st.selectbox(
-                "選擇訓練項目",
-                options=drill_ids,
-                format_func=lambda did: drill_label_map.get(int(did), str(did)),
-                key="sd_drill_select",
-            )
-
-            next_seq = fetch_one(con, "SELECT COALESCE(MAX(sequence_no), 0) + 1 FROM session_drills WHERE session_id=?;", (int(selected_session_id),))[0]
-            sequence_no = st.number_input("順序", min_value=1, value=int(next_seq), step=1, key="sd_seq")
-            planned_minutes = st.number_input("預計分鐘", min_value=0, value=20, step=5, key="sd_min")
+            sel_drill_id = st.selectbox("選擇項目", options=drill_ids, format_func=lambda did: drill_label_map.get(int(did), str(did)))
             
-            # 【關鍵修改點】：將「次數」改為「組次」，預設改為更合理的 3 組
-            planned_sets = st.number_input("預計組次", min_value=0, value=3, step=1, key="sd_sets")
+            # 自動計算下一個順序
+            next_seq = con.execute("SELECT COALESCE(MAX(sequence_no), 0) + 1 FROM session_drills WHERE session_id=?;", (int(selected_session_id),)).fetchone()[0]
+            
+            c1, c2 = st.columns(2)
+            with c1:
+                seq = st.number_input("順序", min_value=1, value=int(next_seq))
+                p_min = st.number_input("預計分鐘", min_value=0, value=20, step=5)
+            with c2:
+                # 【修改點 1】：改為文字輸入，讓你可以填 50*2
+                p_sets = st.text_input("預計組次 (如: 50*2)", value="3")
 
-            if st.button("加入場次", key="sd_add"):
+            if st.button("加入流程", use_container_width=True):
                 exec_one(con, """
-                    INSERT OR REPLACE INTO session_drills 
-                    (session_id, drill_id, sequence_no, planned_minutes, planned_reps) 
+                    INSERT OR REPLACE INTO session_drills (session_id, drill_id, sequence_no, planned_minutes, planned_reps) 
                     VALUES (?, ?, ?, ?, ?);
-                """, (int(selected_session_id), int(selected_drill_id), int(sequence_no), int(planned_minutes), int(planned_sets)))
-                st.success("已成功加入訓練流程！")
+                """, (int(selected_session_id), int(sel_drill_id), int(seq), int(p_min), p_sets))
+                st.success("已加入")
                 st.rerun()
 
     with colR:
-        st.markdown("#### 場次列表")
-        st.dataframe(sessions[["session_date", "duration_min", "theme"]], use_container_width=True, hide_index=True)
-
-        st.markdown("#### 訓練流程（session_drills）")
-        st.dataframe(
-            df(con, """
-                SELECT s.theme AS 場次,
-                       sd.sequence_no AS 順序, 
-                       d.drill_name AS 訓練項目,
-                       sd.planned_minutes AS 分鐘, 
-                       sd.planned_reps AS 預計組次 -- 這裡的抬頭也改為組次
+        st.markdown("#### 本場訓練流程清單")
+        if selected_session_id:
+            # 【修改點 2】：SQL 只抓取當前選中的 session_id
+            current_drills_df = df(con, """
+                SELECT 
+                    sd.sequence_no AS 順序, 
+                    d.drill_name AS 訓練項目,
+                    sd.planned_minutes AS 分鐘, 
+                    sd.planned_reps AS 預計組次
                 FROM session_drills sd
-                JOIN sessions s ON s.session_id = sd.session_id
                 JOIN drills d ON d.drill_id = sd.drill_id
-                ORDER BY s.session_date DESC, sd.sequence_no ASC;
-            """),
-            use_container_width=True,
-            hide_index=True
-        )
+                WHERE sd.session_id = ?
+                ORDER BY sd.sequence_no ASC;
+            """, (int(selected_session_id),))
+
+            if not current_drills_df.empty:
+                # 【修改點 3】：計算總時間並增加「總計」列
+                total_minutes = current_drills_df["分鐘"].sum()
+                
+                # 建立總計列
+                total_row = pd.DataFrame({
+                    "順序": [""],
+                    "訓練項目": ["**總計時間**"],
+                    "分鐘": [total_minutes],
+                    "預計組次": [""]
+                })
+                
+                # 合併表格
+                display_df = pd.concat([current_drills_df, total_row], ignore_index=True)
+
+                st.dataframe(
+                    display_df,
+                    use_container_width=True,
+                    hide_index=True
+                )
+                st.info(f"💡 此場次目前規劃總時長：**{total_minutes}** 分鐘")
+            else:
+                st.warning("此場次尚未安排訓練項目。")
         
 # ---- Tab 4: Results ----
 with tab4:
