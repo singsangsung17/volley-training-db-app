@@ -284,77 +284,81 @@ with tab3:
             else:
                 st.warning("尚未為此場次安排任何訓練項目。")
         
-# ---- Tab 4: Results (修正報錯 + 簡約點擊器版) ----
+# ---- Tab 4: Results (修正報錯 + 實務點擊器) ----
 with tab4:
     st.subheader("現場數據紀錄")
 
-    # 【修復關鍵】：從資料庫重新抓取資料，避免 NameError
-    sessions_df_t4 = df(con, "SELECT session_id, session_date, theme FROM sessions ORDER BY session_date DESC;")
-    players_df_t4 = df(con, "SELECT player_id, name FROM players ORDER BY name;")
+    # 確保資料即時抓取，避免 NameError
+    t4_sessions = df(con, "SELECT session_id, session_date, theme FROM sessions ORDER BY session_date DESC;")
+    t4_players = df(con, "SELECT player_id, name FROM players ORDER BY name;")
 
-    # 初始化暫存計數器
+    # 初始化計數器 (暫存在 session_state)
     if 'count_success' not in st.session_state: st.session_state.count_success = 0
-    if 'count_total_tmp' not in st.session_state: st.session_state.count_total_tmp = 0
+    if 'count_total' not in st.session_state: st.session_state.count_total = 0
 
-    if sessions_df_t4.empty or players_df_t4.empty:
-        st.info("請先新增場次與球員資料。")
+    if t4_sessions.empty or t4_players.empty:
+        st.info("請先確認已建立場次與球員資料。")
     else:
-        # 1. 選擇區
-        top1, top2, top3 = st.columns(3)
-        with top1:
-            s_map = {int(r.session_id): f"{r.session_date} | {r.theme}" for r in sessions_df_t4.itertuples(index=False)}
-            sid = st.selectbox("選擇場次", options=list(s_map.keys()), format_func=lambda x: s_map[x], key="t4_sid")
-        with top2:
-            p_map = {int(r.player_id): r.name for r in players_df_t4.itertuples(index=False)}
-            pid = st.selectbox("選擇球員", options=list(p_map.keys()), format_func=lambda x: p_map[x], key="t4_pid")
-        with top3:
-            # 只抓取該場次已安排的訓練項目
-            current_drills = df(con, """
-                SELECT d.drill_id, d.drill_name FROM session_drills sd 
-                JOIN drills d ON d.drill_id = sd.drill_id WHERE sd.session_id = ?
-            """, (int(sid),))
-            drill_options = {int(r.drill_id): r.drill_name for r in current_drills.itertuples(index=False)}
-            drill_options[summary_drill_id] = "本場次總結"
-            did = st.selectbox("訓練項目", options=list(drill_options.keys()), format_func=lambda x: drill_options[x], key="t4_did")
+        # --- 選擇區 ---
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            s_map = {int(r.session_id): f"{r.session_date} | {r.theme}" for r in t4_sessions.itertuples(index=False)}
+            sid = st.selectbox("場次", options=list(s_map.keys()), format_func=lambda x: s_map[x], key="t4_sid")
+        with c2:
+            p_map = {int(r.player_id): r.name for r in t4_players.itertuples(index=False)}
+            pid = st.selectbox("球員", options=list(p_map.keys()), format_func=lambda x: p_map[x], key="t4_pid")
+        with c3:
+            # 只顯示該場次安排的項目，並手動定義總結項 ID
+            current_drills = df(con, "SELECT d.drill_id, d.drill_name FROM session_drills sd JOIN drills d ON d.drill_id = sd.drill_id WHERE sd.session_id = ?", (int(sid),))
+            d_options = {int(r.drill_id): r.drill_name for r in current_drills.itertuples(index=False)}
+            
+            # 確保有總結項
+            sum_row = df(con, "SELECT drill_id FROM drills WHERE category = 'summary' LIMIT 1;")
+            s_drill_id = int(sum_row.iloc[0]['drill_id']) if not sum_row.empty else 1
+            d_options[s_drill_id] = "本場次總結"
+            
+            did = st.selectbox("紀錄項目", options=list(d_options.keys()), format_func=lambda x: d_options[x], key="t4_did")
 
         st.divider()
 
-        # 2. 核心點擊器（為了讓紀錄者不累，按鈕放大並上色）
-        st.markdown("#### 即時計數 (觀察球員表現時直接點擊)")
-        c_l, c_r = st.columns(2)
-        with c_l:
+        # --- 核心：省力點擊器 ---
+        st.markdown("#### 即時計數 (看到動作即刻點擊)")
+        click_l, click_r = st.columns(2)
+        with click_l:
+            # 統一綠色按鈕 (CSS 已在全域設定)
             if st.button("成功 (+1)", use_container_width=True, type="primary"):
                 st.session_state.count_success += 1
-                st.session_state.count_total_tmp += 1
+                st.session_state.count_total += 1
                 st.rerun()
-        with c_r:
+        with click_r:
             if st.button("失誤 (+1)", use_container_width=True):
-                st.session_state.count_total_tmp += 1
+                st.session_state.count_total += 1
                 st.rerun()
 
-        # 數據預覽
-        t_total = st.session_state.count_total_tmp
-        t_rate = (st.session_state.count_success / t_total) if t_total > 0 else 0
-        st.metric("目前累計", f"{st.session_state.count_success} / {t_total}", f"成功率 {t_rate:.1%}")
+        # 當前進度預覽
+        curr_total = st.session_state.count_total
+        curr_rate = (st.session_state.count_success / curr_total) if curr_total > 0 else 0
+        st.metric("目前累計", f"{st.session_state.count_success} / {curr_total}", f"成功率 {curr_rate:.1%}")
 
-        if st.button("清空暫存", key="clear_tmp", use_container_width=True):
+        if st.button("清空計數", key="reset_click", use_container_width=True):
             st.session_state.count_success = 0
-            st.session_state.count_total_tmp = 0
+            st.session_state.count_total = 0
             st.rerun()
 
         st.divider()
 
-        # 3. 正式存檔區
-        with st.form("t4_final_form", clear_on_submit=True):
+        # --- 正式存檔區 ---
+        with st.form("t4_final_save", clear_on_submit=True):
             st.markdown("#### 補充資訊並存檔")
             f1, f2 = st.columns(2)
             with f1:
                 final_s = st.number_input("確認成功數", value=st.session_state.count_success)
             with f2:
-                final_t = st.number_input("確認總次數", value=st.session_state.count_total_tmp)
+                final_t = st.number_input("確認總次數", value=st.session_state.count_total)
             
-            issue = st.selectbox("主要問題", ["無", "腳步不到位", "手型不穩", "擊球點錯誤", "觀察不足", "溝通喊聲"])
-            notes = st.text_area("備註", height=70)
+            # 教練在意的是失誤原因的標準化
+            issue = st.selectbox("主要問題標籤", ["無", "腳步不到位", "擊球點錯誤", "觀察判斷遲緩", "溝通喊聲不足", "體能/節奏偏差"])
+            notes = st.text_area("教練點評 / 球員心得", height=80)
 
             if st.form_submit_button("正式存入資料庫", type="primary", use_container_width=True):
                 exec_one(con, """
@@ -362,12 +366,12 @@ with tab4:
                     VALUES (?, ?, ?, ?, ?, ?, ?);
                 """, (int(sid), int(did), int(pid), int(final_s), int(final_t), issue, notes))
                 
-                # 重置暫存
+                # 重置點擊器
                 st.session_state.count_success = 0
-                st.session_state.count_total_tmp = 0
-                st.success("數據已存檔")
+                st.session_state.count_total = 0
+                st.success("數據已正式紀錄")
                 st.rerun()
-
+                
 # ---- Tab 5: Analytics ----
 with tab5:
     st.markdown("#### 分析（對應附錄 SQL 範例）")
