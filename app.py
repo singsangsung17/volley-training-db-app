@@ -204,36 +204,37 @@ with tab2:
             hide_index=True
         )
         
-# ---- Tab 3: Sessions (場次安排：恢復預計組次名稱) ----
+# ---- Tab 3: Sessions (場次安排：恢復新增功能 + 修正預計組次) ----
 with tab3:
     st.subheader("場次管理與項目安排")
 
-    # 建立左右兩欄
+    # 建立左右兩欄：左邊進行設定，右邊看流程表格
     col_manage, col_flow = st.columns([1, 1.5])
 
     with col_manage:
-        # 1. 新增場次
-        with st.expander("新增訓練場次"):
-            new_date = st.date_input("日期", key="new_s_date")
-            new_theme = st.text_input("訓練主題 (如：綜合訓練)", key="new_s_theme")
+        # 1. 新增訓練場次 (確保系統能運作的核心功能)
+        with st.expander("➕ 新增訓練場次"):
+            new_date = st.date_input("選擇日期", key="new_s_date")
+            new_theme = st.text_input("訓練主題 (例如：體能強化、基本接發)", key="new_s_theme")
             if st.button("確認新增場次", type="primary", use_container_width=True):
                 if new_theme:
                     exec_one(con, "INSERT INTO sessions (session_date, theme) VALUES (?, ?)", 
                              (str(new_date), new_theme))
-                    st.success(f"已新增：{new_date} {new_theme}")
+                    st.success(f"已成功新增：{new_date} {new_theme}")
                     st.rerun()
                 else:
-                    st.error("請輸入訓練主題")
+                    st.error("訓練主題不能為空")
 
         st.divider()
 
-        # 2. 選擇場次與加入項目
+        # 2. 選擇場次與安排項目
         sessions_df = df(con, "SELECT session_id, session_date, theme FROM sessions ORDER BY session_date DESC;")
         if not sessions_df.empty:
             s_map = {int(r.session_id): f"{r.session_date} | {r.theme}" for r in sessions_df.itertuples(index=False)}
             sid = st.selectbox("選擇目前操作場次", options=list(s_map.keys()), format_func=lambda x: s_map[x], key="s3_sid")
 
             st.markdown("#### 加入項目")
+            # 獲取排除總結項的訓練清單
             drills_df = df(con, "SELECT drill_id, drill_name FROM drills WHERE category != 'summary' ORDER BY drill_name;")
             d_map = {int(r.drill_id): r.drill_name for r in drills_df.itertuples(index=False)}
             
@@ -245,7 +246,7 @@ with tab3:
             with c2:
                 mins = st.number_input("預計分鐘", min_value=5, step=5, value=20)
             
-            # 標籤改回預計組次，移除多餘文字
+            # 【關鍵修改】：修改範例文字，移除「3組」，保留單位
             target = st.text_input("預計組次 (例如: 50*2 或 50下)", value="50下")
 
             if st.button("確認加入流程", type="primary", use_container_width=True):
@@ -253,17 +254,18 @@ with tab3:
                     INSERT INTO session_drills (session_id, drill_id, drill_order, duration_minutes, target_reps)
                     VALUES (?, ?, ?, ?, ?)
                 """, (int(sid), int(sel_did), int(order), int(mins), target))
-                st.success("已加入流程")
+                st.success("項目已成功加入本場次流程")
                 st.rerun()
         else:
-            st.info("請先新增訓練場次。")
+            st.info("目前尚無場次，請點選上方「新增訓練場次」開始規劃。")
 
     with col_flow:
         st.markdown("#### 本場訓練流程")
         if not sessions_df.empty:
-            # SQL 查詢中的別名也改為「預計組次」
+            # 【關鍵修改】：將表格欄位名稱 alias 改為「預計組次」並確保 SQL 正確
             flow_df = df(con, """
-                SELECT sd.drill_order AS No, d.drill_name AS 訓練內容, 
+                SELECT sd.drill_order AS No, 
+                       d.drill_name AS 訓練內容, 
                        sd.duration_minutes || ' min' AS 分鐘, 
                        sd.target_reps AS 預計組次
                 FROM session_drills sd
@@ -273,7 +275,9 @@ with tab3:
             """, (int(sid),))
 
             if not flow_df.empty:
-                st.table(flow_df)
+                st.table(flow_df) # 使用 table 維持畫面整潔
+                
+                # 計算總時長
                 total_min = df(con, "SELECT SUM(duration_minutes) FROM session_drills WHERE session_id = ?", (int(sid),)).iloc[0,0]
                 st.info(f"本場次規劃統計：總時長共 {total_min} 分鐘。")
                 
@@ -281,7 +285,7 @@ with tab3:
                     exec_one(con, "DELETE FROM session_drills WHERE session_id = ?", (int(sid),))
                     st.rerun()
             else:
-                st.write("目前尚無排定項目。")
+                st.write("此場次目前尚無排定任何訓練項目。")
         
 # ---- Tab 4: Results (終極巨型按鈕 + 確保過濾總結) ----
 with tab4:
