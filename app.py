@@ -216,7 +216,7 @@ with tab3:
         st.subheader("場次管理")
         
         # --- 新增場次區域 (Expander 保持簡潔) ---
-        with st.expander("➕ 新增訓練場次"):
+        with st.expander("新增訓練場次"):
             new_date = st.date_input("選擇日期", key="new_s_date")
             new_theme = st.text_input("訓練主題 (例如：體能強化、基本接發)", key="new_s_theme")
             if st.button("確認新增場次", type="primary", use_container_width=True):
