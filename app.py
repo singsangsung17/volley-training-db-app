@@ -122,19 +122,17 @@ with st.sidebar:
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs(["球員 players", "訓練項目 drills", "訓練場次 sessions", "成效紀錄 drill_results", "分析（SQL）"])
 
-# ---- Tab 1: Players (美化 & 綠色按鈕版) ----
+# ---- Tab 1: Players (球員管理 - 可編輯表格版) ----
 with tab1:
-    colL, colR = st.columns([1, 1])
+    colL, colR = st.columns([1, 1.5]) # 稍微放寬右側表格空間
     with colL:
         st.subheader("新增球員")
         name = st.text_input("姓名", key="p_name")
         POS_OPTIONS = ["主攻", "攔中", "副攻", "舉球", "自由", "（不填）"]
         pos_sel = st.selectbox("位置（可選）", POS_OPTIONS, index=0, key="p_pos_sel")
         position = "" if pos_sel == "（不填）" else pos_sel
-
         grade_year = st.text_input("年級（例：大一/大二）", key="p_grade")
         
-        # --- 關鍵改動：加上 type="primary" 寬度設為滿版 ---
         if st.button("新增球員", key="p_add", type="primary", use_container_width=True):
             if not name.strip():
                 st.error("姓名必填。")
@@ -145,20 +143,48 @@ with tab1:
                 st.rerun()
                 
     with colR:
-        st.subheader("球員列表")
-        st.dataframe(
-            df(con, """
-                SELECT 
-                  name AS 姓名,
-                  position AS 位置,
-                  grade_year AS 年級,
-                  created_at AS 建立時間
-                FROM players 
-                ORDER BY created_at DESC;
-            """),
-            use_container_width=True,
-            hide_index=True,
-        )
+        st.subheader("球員列表 (雙擊儲存格可直接修改)")
+        
+        # 1. 從資料庫讀取最新球員資料
+        players_df = df(con, "SELECT player_id, name, position, grade_year FROM players ORDER BY created_at DESC")
+        
+        if not players_df.empty:
+            # 2. 使用 st.data_editor 顯示可編輯表格
+            # 我們禁用 player_id 的編輯，因為它是資料庫的主鍵 (Primary Key)
+            edited_df = st.data_editor(
+                players_df,
+                key="players_table_editor",
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "player_id": st.column_config.TextColumn("ID", disabled=True, width="small"),
+                    "name": st.column_config.TextColumn("姓名", required=True),
+                    "position": st.column_config.SelectboxColumn(
+                        "位置", 
+                        options=["主攻", "攔中", "副攻", "舉球", "自由"],
+                        required=False
+                    ),
+                    "grade_year": "年級"
+                }
+            )
+            
+            # 3. 儲存修改的按鈕
+            # 當使用者改完表格後，按下此按鈕會將整張表的狀態寫回資料庫
+            if st.button("儲存所有修改", type="primary", use_container_width=True):
+                try:
+                    for _, row in edited_df.iterrows():
+                        exec_one(con, """
+                            UPDATE players 
+                            SET name = ?, position = ?, grade_year = ? 
+                            WHERE player_id = ?
+                        """, (row['name'], row['position'], row['grade_year'], int(row['player_id'])))
+                    st.success("所有修改已成功存入資料庫！")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"更新過程中發生錯誤：{e}")
+        else:
+            st.info("目前尚無球員資料，請由左側新增。")
+
 # ---- Tab 2: Drills (按鈕加色 + 簡約版) ----
 with tab2:
     colL, colR = st.columns([1, 1])
