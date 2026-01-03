@@ -41,19 +41,15 @@ CREATE TABLE IF NOT EXISTS session_drills (
   FOREIGN KEY (drill_id)   REFERENCES drills(drill_id)   ON DELETE CASCADE
 );
 
-CREATE TABLE IF NOT EXISTS drill_results (
-  result_id      INTEGER PRIMARY KEY AUTOINCREMENT,
-  session_id     INTEGER NOT NULL,
-  drill_id       INTEGER NOT NULL,
-  player_id      INTEGER NOT NULL,
-  success_count  INTEGER NOT NULL DEFAULT 0,
-  total_count    INTEGER NOT NULL DEFAULT 0,
-  error_type     TEXT,
-  recorded_at    TEXT NOT NULL DEFAULT (datetime('now')),
-  notes          TEXT,
-  FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE,
-  FOREIGN KEY (drill_id)   REFERENCES drills(drill_id)     ON DELETE CASCADE,
-  FOREIGN KEY (player_id)  REFERENCES players(player_id)   ON DELETE CASCADE
+CREATE TABLE IF NOT EXISTS drills (
+  drill_id      INTEGER PRIMARY KEY AUTOINCREMENT,
+  drill_name    TEXT NOT NULL,
+  category      TEXT NOT NULL, -- 八大類別
+  difficulty    INTEGER DEFAULT 3, -- 難度 1-5
+  num_players   INTEGER DEFAULT 6, -- 人數需求 (純數字，利於排序)
+  objective     TEXT, -- 訓練重點
+  notes         TEXT, -- 備註
+  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 -- 【新加入的位置】
