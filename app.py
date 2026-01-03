@@ -312,7 +312,7 @@ with tab3:
 
 # ---- 點名功能開始 ----
         st.divider()
-        st.subheader("👥 現場點名")
+        st.subheader(" 出缺席")
 
         if selected_session_id:
             # 1. 取得所有球員清單
