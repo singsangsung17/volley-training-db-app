@@ -4,9 +4,10 @@ PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS players (
   player_id     INTEGER PRIMARY KEY AUTOINCREMENT,
   name          TEXT NOT NULL,
-  jersey_number INTEGER, -- 新增：背號
+  jersey_number INTEGER,
   position      TEXT,
   grade_year    TEXT,
+  notes         TEXT,    -- 新增：備註欄位
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
