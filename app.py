@@ -197,52 +197,82 @@ with tab1:
         except Exception as e:
             st.error(f"儲存失敗，請檢查資料庫連線：{e}")
 
-# ---- Tab 2: Drills (按鈕加色 + 簡約版) ----
+# ---- Tab 2: Drills (分類管理 & 隱藏機制) ----
 with tab2:
-    colL, colR = st.columns([1, 1])
+    st.subheader("🏐 訓練項目庫管理")
+    MAIN_CATEGORIES = ["綜合訓練", "傳球", "發球", "接球", "攻擊", "攔網", "位置別", "實戰練習"]
+    tabs = st.tabs(MAIN_CATEGORIES + ["🔒 已隱藏項目"])
+    editor_states = {}
 
-    with colL:
-        st.subheader("新增訓練項目")
-        drill_name = st.text_input("訓練項目名稱", key="d_name")
-        category = st.selectbox("分類", options=["攻擊", "接發", "防守", "發球", "舉球", "攔網", "接球", "傳球", "綜合"], key="d_category")
-        num_people = st.number_input("建議人數", min_value=1, value=6, step=1, key="d_people")
-        people_display = f"{num_people}人以上"
-        st.info(f"目前設定：{people_display}")
-        difficulty = st.slider("難度 (1-5)", 1, 5, 3, key="d_diff")
+    for i, cat_name in enumerate(MAIN_CATEGORIES):
+        with tabs[i]:
+            # 增加讀取 min_players 欄位
+            df_cat = df(con, "SELECT drill_id, drill_name, min_players, difficulty, objective, notes, is_hidden FROM drills WHERE category = ? AND is_hidden = 0", (cat_name,))
+            
+            editor_states[cat_name] = st.data_editor(
+                df_cat,
+                key=f"editor_v3_{cat_name}",
+                use_container_width=True,
+                num_rows="dynamic",
+                hide_index=True,
+                column_config={
+                    "drill_id": None,
+                    "drill_name": st.column_config.TextColumn("項目名稱", required=True, width="medium"),
+                    "min_players": st.column_config.NumberColumn("人數", min_value=1, max_value=20, format="%d人", width="small"), # 新增配置
+                    "difficulty": st.column_config.SelectboxColumn("難度", options=[1, 2, 3, 4, 5], default=3, width="small"),
+                    "objective": st.column_config.TextColumn("訓練重點", width="medium"),
+                    "is_hidden": st.column_config.CheckboxColumn("隱藏?", default=False),
+                    "notes": st.column_config.TextColumn("備註", width="large")
+                }
+            )
 
-        # --- 關鍵改動：加上 type="primary" 和用滿寬度 ---
-        if st.button("新增訓練項目", key="d_add", type="primary", use_container_width=True):
-            _name = (drill_name or "").strip()
-            if not _name:
-                st.error("訓練項目名稱不可為空。")
-            else:
-                exec_one(
-                    con,
-                    f"INSERT INTO drills (drill_name, {DRILLS_TEXT_COL}, category, difficulty) VALUES (?, ?, ?, ?);",
-                    (_name, people_display, category, int(difficulty)),
-                )
-                st.success(f"已新增項目：{_name}")
-                st.rerun()
-
-    with colR:
-        st.subheader("訓練項目列表")
-        st.dataframe(
-            df(con, f"""
-                SELECT 
-                    difficulty AS 難度,
-                    drill_name AS 訓練項目,
-                    CASE 
-                        WHEN {DRILLS_TEXT_COL} LIKE '%人以上' THEN {DRILLS_TEXT_COL}
-                        ELSE '未設定 (舊資料)' 
-                    END AS 人數需求,
-                    category AS 類別
-                FROM drills 
-                WHERE category != 'summary' AND drill_name != '本場次總結'
-                ORDER BY created_at DESC;
-            """),
+    # 2. 處理「已隱藏項目」分頁
+    with tabs[-1]:
+        st.caption("此處顯示所有被隱藏的項目，取消勾選『隱藏』即可移回原分類。")
+        df_hidden = df(con, "SELECT drill_id, drill_name, category, difficulty, objective, notes, is_hidden FROM drills WHERE is_hidden = 1")
+        
+        editor_states["hidden"] = st.data_editor(
+            df_hidden,
+            key="editor_hidden",
             use_container_width=True,
-            hide_index=True
+            num_rows="dynamic",
+            hide_index=True,
+            column_config={
+                "drill_id": None,
+                "drill_name": st.column_config.TextColumn("項目名稱", required=True),
+                "category": st.column_config.SelectboxColumn("類別", options=MAIN_CATEGORIES, required=True),
+                "is_hidden": st.column_config.CheckboxColumn("隱藏?", default=True),
+                "difficulty": st.column_config.SelectboxColumn("難度", options=[1, 2, 3, 4, 5])
+            }
         )
+
+    # 3. 統一儲存按鈕
+    if st.button("💾 儲存所有類別變更", type="primary", use_container_width=True):
+        try:
+            # 處理邏輯：遍歷所有編輯器的變動
+            for cat, edited_df in editor_states.items():
+                # 取得原本在資料庫中的 ID 集合（用來判斷刪除）
+                # 這裡為了簡化，採納「以各分頁現有內容為準」更新
+                
+                for _, row in edited_df.iterrows():
+                    # 決定類別：隱藏分頁用自己的 category 欄位，其餘分頁用分頁標籤
+                    target_cat = row['category'] if cat == "hidden" else cat
+                    
+                    if pd.isna(row['drill_id']): # 新增
+                        exec_one(con, """
+                            INSERT INTO drills (drill_name, category, difficulty, objective, notes, is_hidden)
+                            VALUES (?, ?, ?, ?, ?, ?)
+                        """, (row['drill_name'], target_cat, row['difficulty'], row['objective'], row['notes'], row['is_hidden']))
+                    else: # 更新
+                        exec_one(con, """
+                            UPDATE drills SET drill_name=?, category=?, difficulty=?, objective=?, notes=?, is_hidden=?
+                            WHERE drill_id=?
+                        """, (row['drill_name'], target_cat, row['difficulty'], row['objective'], row['notes'], row['is_hidden'], int(row['drill_id'])))
+            
+            st.success("訓練項目庫已同步更新！")
+            st.rerun()
+        except Exception as e:
+            st.error(f"儲存失敗：{e}")
         
 # ---- Tab 3: Sessions (補回新增場次功能版) ----
 with tab3:
