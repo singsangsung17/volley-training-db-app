@@ -18,15 +18,15 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 
 CREATE TABLE IF NOT EXISTS drills (
-  drill_id      INTEGER PRIMARY KEY AUTOINCREMENT,
-  drill_name    TEXT NOT NULL,
-  category      TEXT,      -- 八大類別
-  min_players   INTEGER,   -- 需求人數
-  difficulty    INTEGER,   -- 1-5
-  is_hidden     INTEGER DEFAULT 0, -- 0:顯示, 1:隱藏
-  objective     TEXT,      -- 訓練重點
-  notes         TEXT,      -- 備註
-  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+  drill_id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  drill_name         TEXT NOT NULL,
+  category           TEXT,
+  min_players        INTEGER,
+  neuromuscular_load INTEGER, -- 替換原本的 difficulty
+  is_hidden          INTEGER DEFAULT 0,
+  objective          TEXT,
+  notes              TEXT,
+  created_at         TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS attendance (
