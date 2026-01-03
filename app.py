@@ -309,6 +309,63 @@ with tab3:
                     st.rerun()
             else:
                 st.warning("尚未為此場次安排任何訓練項目。")
+
+# ---- 點名功能開始 ----
+        st.divider()
+        st.subheader("👥 現場點名")
+
+        if selected_session_id:
+            # 1. 取得所有球員清單
+            all_players = df(con, "SELECT player_id, name FROM players ORDER BY name;")
+            
+            # 2. 取得該場次已有的點名紀錄，以便顯示勾選狀態
+            existing_att = df(con, "SELECT player_id, status FROM attendance WHERE session_id = ?", (int(selected_session_id),))
+            # 轉換成字典格式方便查詢 {player_id: status}
+            att_dict = dict(zip(existing_att['player_id'], existing_att['status']))
+
+            if all_players.empty:
+                st.info("請先到 Tab 1 新增球員。")
+            else:
+                # 使用 Expander 讓點名表可以收合，保持介面整潔
+                with st.expander("展開本日點名單", expanded=False):
+                    # 使用 st.form 確保所有人的狀態選好後一次提交
+                    with st.form(f"att_form_{selected_session_id}"):
+                        new_att_status = {}
+                        
+                        # 列出每位球員
+                        for _, row in all_players.iterrows():
+                            p_id = int(row['player_id'])
+                            p_name = row['name']
+                            
+                            # 預設值：若有舊紀錄則用舊的，否則預設為 "出席"
+                            current_val = att_dict.get(p_id, "出席")
+                            options = ["出席", "請假", "遲到", "缺席"]
+                            
+                            # 佈局：左邊姓名，右邊選項
+                            c_name, c_opt = st.columns([1, 2])
+                            c_name.markdown(f"**{p_name}**")
+                            
+                            # 使用 radio 或 selectbox，這裡推薦 selectbox 較省空間
+                            new_att_status[p_id] = c_opt.selectbox(
+                                "狀態", options, 
+                                index=options.index(current_val),
+                                key=f"sel_att_{selected_session_id}_{p_id}",
+                                label_visibility="collapsed"
+                            )
+                        
+                        # 提交表單
+                        if st.form_submit_button("儲存簽到表", type="primary", use_container_width=True):
+                            for p_id, status in new_att_status.items():
+                                exec_one(con, """
+                                    INSERT OR REPLACE INTO attendance (session_id, player_id, status)
+                                    VALUES (?, ?, ?)
+                                """, (int(selected_session_id), p_id, status))
+                            st.success("點名紀錄已存檔！")
+                            st.rerun() # 重新整理以反映數據
+        else:
+            st.caption("請先選擇或新增訓練場次。")
+        # ---- 點名功能結束 ----
+
         
 # ---- Tab 4: Results (終極巨型按鈕 + 確保過濾總結) ----
 with tab4:
