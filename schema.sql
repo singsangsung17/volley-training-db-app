@@ -4,6 +4,7 @@ PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS players (
   player_id     INTEGER PRIMARY KEY AUTOINCREMENT,
   name          TEXT NOT NULL,
+  jersey_number INTEGER, -- 新增：背號
   position      TEXT,
   grade_year    TEXT,
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))
