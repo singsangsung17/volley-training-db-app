@@ -143,7 +143,7 @@ with tab1:
         num_rows="dynamic",  # 允許動態增減行
         hide_index=True,
         column_config={
-            "player_id": None, # 【隱藏 ID】資管系統專業做法：主鍵不給使用者看
+            "player_id": None, # 【隱藏 ID】
             "jersey_number": st.column_config.NumberColumn(
                 "背號", 
                 min_value=1, 
@@ -216,52 +216,50 @@ with tab1:
         except Exception as e:
             st.error(f"儲存過程中發生錯誤：{e}")
         
-# ---- Tab 2: Drills (神經負荷專業版) ----
+# ---- Tab 2: Drills (中文化介面 + 神經負荷專業版) ----
 with tab2:
     st.subheader("🏐 訓練項目庫管理")
     st.caption("點選類別查看教案，表格依人數排序，勾選「隱藏」並點擊儲存可移至鎖頭分頁管理。")
 
-    # 1. 定義八大類別
+    # 1. 定義類別與建立分頁
     MAIN_CATS = ["綜合訓練", "傳球", "發球", "接球", "攻擊", "攔網", "位置別", "實戰練習"]
-    
-    # 2. 建立子分頁
     drill_tabs = st.tabs(MAIN_CATS + ["🔒 已隱藏項目"])
     editor_states = {} 
 
-    # 3. 渲染技術分頁
+    # 2. 渲染技術分頁
     for i, cat_name in enumerate(MAIN_CATS):
         with drill_tabs[i]:
-            # SQL 查詢：改選取 neuromuscular_load
+            # 從資料庫抓取資料 (注意：SQL 欄位名稱維持英文以對應資料庫)
             df_cat = df(con, """
                 SELECT drill_id, drill_name, min_players, neuromuscular_load, objective, notes, is_hidden
                 FROM drills WHERE category = ? AND is_hidden = 0
                 ORDER BY min_players ASC
             """, (cat_name,))
             
+            # 【關鍵：中文化配置】透過 column_config 將英文標頭轉為中文
             editor_states[cat_name] = st.data_editor(
                 df_cat,
-                key=f"editor_v7_{cat_name}",
+                key=f"editor_final_zh_{cat_name}",
                 use_container_width=True,
                 num_rows="dynamic",
                 hide_index=True,
                 column_config={
-                    "drill_id": None,
+                    "drill_id": None, # 隱藏 ID 不顯示
                     "drill_name": st.column_config.TextColumn("項目名稱", required=True, width="medium"),
-                    "min_players": st.column_config.NumberColumn("人數", format="%d人+", min_value=1),
+                    "min_players": st.column_config.NumberColumn("人數", format="%d人+", min_value=1, width="small"),
                     "neuromuscular_load": st.column_config.SelectboxColumn(
                         "神經負荷", 
-                        help="神經系統疲勞程度 (1:極低 - 5:極高)",
+                        help="根據神經肌肉負荷評分 (1:極低 - 5:極高)", 
                         options=[1, 2, 3, 4, 5], 
-                        default=3, 
                         width="small"
                     ),
                     "objective": st.column_config.TextColumn("訓練重點", width="medium"),
-                    "notes": st.column_config.TextColumn("備註"),
+                    "notes": st.column_config.TextColumn("備註", width="medium"),
                     "is_hidden": st.column_config.CheckboxColumn("隱藏?", default=False)
                 }
             )
 
-    # 4. 隱藏項目分頁
+    # 3. 渲染隱藏分頁
     with drill_tabs[-1]:
         df_hidden = df(con, """
             SELECT drill_id, drill_name, category, min_players, neuromuscular_load, objective, notes, is_hidden
@@ -269,30 +267,38 @@ with tab2:
         """)
         editor_states["hidden_items"] = st.data_editor(
             df_hidden,
-            key="editor_hidden_v7",
+            key="editor_hidden_zh",
             use_container_width=True,
             num_rows="dynamic",
             hide_index=True,
             column_config={
                 "drill_id": None,
+                "drill_name": st.column_config.TextColumn("項目名稱"),
                 "category": st.column_config.SelectboxColumn("原類別", options=MAIN_CATS),
+                "min_players": st.column_config.NumberColumn("人數", format="%d人+"),
                 "neuromuscular_load": st.column_config.SelectboxColumn("神經負荷", options=[1, 2, 3, 4, 5]),
+                "objective": st.column_config.TextColumn("訓練重點"),
                 "is_hidden": st.column_config.CheckboxColumn("隱藏?", default=True)
             }
         )
 
-    # 5. 統一儲存按鈕
+    # 4. 統一儲存按鈕 (與分頁同級，確保縮排正確)
+    st.write("") 
     if st.button("💾 儲存所有項目變更", type="primary", use_container_width=True):
         try:
             for cat_key, edited_df in editor_states.items():
-                # 處理刪除
-                db_ids = df(con, "SELECT drill_id FROM drills WHERE " + ("is_hidden=1" if cat_key=="hidden_items" else f"category='{cat_key}' AND is_hidden=0"))
-                orig_ids = set(db_ids['drill_id'].dropna().unique())
-                curr_ids = set(edited_df['drill_id'].dropna().unique())
-                for d_id in (orig_ids - curr_ids):
+                # A. 處理刪除邏輯
+                if cat_key == "hidden_items":
+                    db_df = df(con, "SELECT drill_id FROM drills WHERE is_hidden = 1")
+                else:
+                    db_df = df(con, "SELECT drill_id FROM drills WHERE category = ? AND is_hidden = 0", (cat_key,))
+                
+                original_ids = set(db_df['drill_id'].dropna().unique())
+                current_ids = set(edited_df['drill_id'].dropna().unique())
+                for d_id in (original_ids - current_ids):
                     exec_one(con, "DELETE FROM drills WHERE drill_id = ?", (int(d_id),))
 
-                # 處理新增/更新 (欄位改為 neuromuscular_load)
+                # B. 處理新增與更新 (欄位名稱需與資料庫 neuromuscular_load 一致)
                 for _, row in edited_df.iterrows():
                     target_cat = row['category'] if cat_key == "hidden_items" else cat_key
                     if pd.isna(row['drill_id']): # 新增
@@ -305,7 +311,8 @@ with tab2:
                             UPDATE drills SET drill_name=?, category=?, min_players=?, neuromuscular_load=?, objective=?, notes=?, is_hidden=?
                             WHERE drill_id=?
                         """, (row['drill_name'], target_cat, row['min_players'], row['neuromuscular_load'], row['objective'], row['notes'], row['is_hidden'], int(row['drill_id'])))
-            st.success("🎉 神經負荷教案庫已更新！")
+            
+            st.success("🎉 數據已同步！神經負荷評分已更新。")
             st.rerun()
         except Exception as e:
             st.error(f"儲存失敗：{e}")
