@@ -169,7 +169,7 @@ with tab1:
             "grade_sel": st.column_config.SelectboxColumn("年級", options=STANDARD_GRADES + ["其他"], width="small"),
             "grade_custom": st.column_config.TextColumn("其他(填寫)", width="small"),
             "position": st.column_config.SelectboxColumn("位置", options=["主攻", "攔中", "副攻", "舉球", "自由", "未定"], width="small"),
-            "notes": st.column_config.TextColumn("備註", placeholder="例：左撇子、曾膝蓋受傷", width="large") # 增加備註配置
+            "notes": st.column_config.TextColumn("備註", help="例：左撇子、曾膝蓋受傷", width="large") # 增加備註配置
         }
     )
 
