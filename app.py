@@ -286,9 +286,40 @@ with tab2:
             }
         )
 
-    # 5. 統一儲存按鈕邏輯 (維持原狀，處理 CRUD)
-    if st.button("💾 儲存所有項目變更", type="primary", use_container_width=True):
-        # ... (維持原本的 try-except 儲存邏輯即可)
+   if st.button("💾 儲存所有項目變更", type="primary", use_container_width=True):
+        try:
+            for cat_key, edited_df in editor_states.items():
+                # 取得資料庫目前的 ID 以進行比對
+                if cat_key == "hidden_items":
+                    db_df = df(con, "SELECT drill_id FROM drills WHERE is_hidden = 1")
+                else:
+                    db_df = df(con, "SELECT drill_id FROM drills WHERE category = ? AND is_hidden = 0", (cat_key,))
+                
+                original_ids = set(db_df['drill_id'].dropna().unique())
+                current_ids = set(edited_df['drill_id'].dropna().unique())
+                
+                # A. 處理刪除
+                for d_id in (original_ids - current_ids):
+                    exec_one(con, "DELETE FROM drills WHERE drill_id = ?", (int(d_id),))
+
+                # B. 處理新增與更新
+                for _, row in edited_df.iterrows():
+                    target_cat = row['category'] if cat_key == "hidden_items" else cat_key
+                    if pd.isna(row['drill_id']): # 新增
+                        exec_one(con, """
+                            INSERT INTO drills (drill_name, category, min_players, difficulty, objective, is_hidden, notes)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """, (row['drill_name'], target_cat, row['min_players'], row['difficulty'], row['objective'], row['is_hidden'], row['notes']))
+                    else: # 更新
+                        exec_one(con, """
+                            UPDATE drills SET drill_name=?, category=?, min_players=?, difficulty=?, objective=?, is_hidden=?, notes=?
+                            WHERE drill_id=?
+                        """, (row['drill_name'], target_cat, row['min_players'], row['difficulty'], row['objective'], row['is_hidden'], row['notes'], int(row['drill_id'])))
+            
+            st.success("🎉 項目庫已同步更新！")
+            st.rerun()
+        except Exception as e:
+            st.error(f"儲存失敗：{e}")
 
 # ---- Tab 3: Sessions (補回新增場次功能版) ----
 with tab3:
