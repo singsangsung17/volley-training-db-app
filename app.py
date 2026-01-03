@@ -216,60 +216,60 @@ with tab1:
         except Exception as e:
             st.error(f"儲存過程中發生錯誤：{e}")
         
-# ---- Tab 2: Drills (技術分類管理：含自動排序、隱藏機制與修正後的儲存邏輯) ----
+# ---- Tab 2: Drills (技術分類管理：隱藏欄位移至最後 + 自動排序) ----
 with tab2:
     st.subheader("🏐 訓練項目庫管理")
-    st.caption("使用說明：數據初始按「人數」由小到大排列。點擊標頭可自定義排序。勾選「隱藏」並儲存後項目會移至鎖頭分頁。")
+    st.caption("使用說明：數據初始按「人數」由小到大排列。點擊標頭可自定義排序。「隱藏」欄位已移至最右側。")
 
     # 1. 定義八大類別
     MAIN_CATS = ["綜合訓練", "傳球", "發球", "接球", "攻擊", "攔網", "位置別", "實戰練習"]
     
-    # 2. 建立子分頁 (8大類 + 1個隱藏區)
+    # 2. 建立子分頁
     drill_tabs = st.tabs(MAIN_CATS + ["🔒 已隱藏項目"])
-    editor_states = {} # 用來收集各分頁編輯器的狀態
+    editor_states = {} 
 
     # 3. 渲染前八個技術分頁
     for i, cat_name in enumerate(MAIN_CATS):
         with drill_tabs[i]:
-            # 【排序優化】：使用 ORDER BY min_players ASC 確保由人少排到人多
+            # 【調整 SQL 欄位順序】：將 is_hidden 放到 SELECT 的最後一位
             df_cat = df(con, """
-                SELECT drill_id, drill_name, min_players, difficulty, objective, is_hidden, notes 
+                SELECT drill_id, drill_name, min_players, difficulty, objective, notes, is_hidden
                 FROM drills WHERE category = ? AND is_hidden = 0
                 ORDER BY min_players ASC
             """, (cat_name,))
             
-            # 建立編輯器
             editor_states[cat_name] = st.data_editor(
                 df_cat,
-                key=f"editor_final_{cat_name}",
+                key=f"editor_final_v6_{cat_name}",
                 use_container_width=True,
                 num_rows="dynamic",
                 hide_index=True,
                 column_config={
-                    "drill_id": None, # 隱藏 ID
+                    "drill_id": None, # 隱藏主鍵
                     "drill_name": st.column_config.TextColumn("項目名稱", required=True, width="medium"),
                     "min_players": st.column_config.NumberColumn(
-                        "人數", format="%d人+", min_value=1, default=1, width="small", help="初始按人數從小到大排序"
+                        "人數", format="%d人+", min_value=1, default=1, width="small"
                     ),
                     "difficulty": st.column_config.SelectboxColumn("難度", options=[1, 2, 3, 4, 5], default=3, width="small"),
                     "objective": st.column_config.TextColumn("訓練重點", width="medium"),
-                    "is_hidden": st.column_config.CheckboxColumn("隱藏?", default=False),
-                    "notes": st.column_config.TextColumn("備註", help="記錄執行細節", width="medium") # 修正 placeholder 為 help
+                    "notes": st.column_config.TextColumn("備註", help="記錄執行細節", width="medium"),
+                    "is_hidden": st.column_config.CheckboxColumn("隱藏?", default=False) # 移至最後
                 }
             )
 
     # 4. 渲染最後一個「已隱藏項目」分頁
     with drill_tabs[-1]:
-        st.caption("此處為隱藏區。取消勾選「隱藏」並儲存後，項目會依照「原類別」移回對應分頁。")
+        st.caption("此處為隱藏區。取消勾選最右側的「隱藏」並儲存，即可移回原技術分頁。")
+        # 同樣調整 SQL 順序
         df_hidden = df(con, """
-            SELECT drill_id, drill_name, category, min_players, difficulty, objective, is_hidden, notes 
+            SELECT drill_id, drill_name, category, min_players, difficulty, objective, notes, is_hidden
             FROM drills WHERE is_hidden = 1
             ORDER BY min_players ASC
         """)
         
         editor_states["hidden_items"] = st.data_editor(
             df_hidden,
-            key="editor_hidden_final",
+            key="editor_hidden_final_v6",
             use_container_width=True,
             num_rows="dynamic",
             hide_index=True,
@@ -278,16 +278,17 @@ with tab2:
                 "drill_name": st.column_config.TextColumn("項目名稱", required=True),
                 "category": st.column_config.SelectboxColumn("原類別", options=MAIN_CATS, required=True),
                 "min_players": st.column_config.NumberColumn("人數", format="%d人+"),
-                "is_hidden": st.column_config.CheckboxColumn("隱藏?", default=True)
+                "notes": st.column_config.TextColumn("備註"),
+                "is_hidden": st.column_config.CheckboxColumn("隱藏?", default=True) # 移至最後
             }
         )
 
-    # 5. 統一儲存按鈕 (位於 tab2 底部，解決 IndentationError)
-    st.write("") # 留白
+    # 5. 統一儲存按鈕 (與分頁同級，避免縮排錯誤)
+    st.write("") 
     if st.button("💾 儲存所有項目變更", type="primary", use_container_width=True):
         try:
             for cat_key, edited_df in editor_states.items():
-                # A. 取得該區塊在資料庫目前的 ID 集合以判斷刪除
+                # A. 判斷刪除
                 if cat_key == "hidden_items":
                     db_df = df(con, "SELECT drill_id FROM drills WHERE is_hidden = 1")
                 else:
@@ -296,30 +297,28 @@ with tab2:
                 original_ids = set(db_df['drill_id'].dropna().unique())
                 current_ids = set(edited_df['drill_id'].dropna().unique())
                 
-                # 處理刪除邏輯
                 for d_id in (original_ids - current_ids):
                     exec_one(con, "DELETE FROM drills WHERE drill_id = ?", (int(d_id),))
 
                 # B. 處理新增與更新
                 for _, row in edited_df.iterrows():
-                    # 決定存入資料庫的 category 標籤
                     target_cat = row['category'] if cat_key == "hidden_items" else cat_key
                     
                     if pd.isna(row['drill_id']): # 新增
                         exec_one(con, """
-                            INSERT INTO drills (drill_name, category, min_players, difficulty, objective, is_hidden, notes)
+                            INSERT INTO drills (drill_name, category, min_players, difficulty, objective, notes, is_hidden)
                             VALUES (?, ?, ?, ?, ?, ?, ?)
-                        """, (row['drill_name'], target_cat, row['min_players'], row['difficulty'], row['objective'], row['is_hidden'], row['notes']))
+                        """, (row['drill_name'], target_cat, row['min_players'], row['difficulty'], row['objective'], row['notes'], row['is_hidden']))
                     else: # 更新
                         exec_one(con, """
-                            UPDATE drills SET drill_name=?, category=?, min_players=?, difficulty=?, objective=?, is_hidden=?, notes=?
+                            UPDATE drills SET drill_name=?, category=?, min_players=?, difficulty=?, objective=?, notes=?, is_hidden=?
                             WHERE drill_id=?
-                        """, (row['drill_name'], target_cat, row['min_players'], row['difficulty'], row['objective'], row['is_hidden'], row['notes'], int(row['drill_id'])))
+                        """, (row['drill_name'], target_cat, row['min_players'], row['difficulty'], row['objective'], row['notes'], row['is_hidden'], int(row['drill_id'])))
             
-            st.success("🎉 訓練項目庫（共 187 項）已成功同步並按人數排序！")
+            st.success("🎉 訓練項目庫（共 187 項）已更新，資料順序已同步！")
             st.rerun()
         except Exception as e:
-            st.error(f"儲存失敗，請檢查 SQL 語法或資料格式：{e}")
+            st.error(f"儲存失敗：{e}")
             
 # ---- Tab 3: Sessions (補回新增場次功能版) ----
 with tab3:
