@@ -122,68 +122,71 @@ with st.sidebar:
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs(["球員 players", "訓練項目 drills", "訓練場次 sessions", "成效紀錄 drill_results", "分析（SQL）"])
 
-# ---- Tab 1: Players (球員管理 - 可編輯表格版) ----
+# ---- Tab 1: Players (極簡動態管理版) ----
 with tab1:
-    colL, colR = st.columns([1, 1.5]) # 稍微放寬右側表格空間
-    with colL:
-        st.subheader("新增球員")
-        name = st.text_input("姓名", key="p_name")
-        POS_OPTIONS = ["主攻", "攔中", "副攻", "舉球", "自由", "（不填）"]
-        pos_sel = st.selectbox("位置（可選）", POS_OPTIONS, index=0, key="p_pos_sel")
-        position = "" if pos_sel == "（不填）" else pos_sel
-        grade_year = st.text_input("年級（例：大一/大二）", key="p_grade")
-        
-        if st.button("新增球員", key="p_add", type="primary", use_container_width=True):
-            if not name.strip():
-                st.error("姓名必填。")
-            else:
-                exec_one(con, "INSERT INTO players (name, position, grade_year) VALUES (?, ?, ?);",
-                         (name.strip(), position, grade_year.strip()))
-                st.success(f"球員 {name} 已成功加入列表")
-                st.rerun()
-                
-    with colR:
-        st.subheader("球員列表 (雙擊儲存格可直接修改)")
-        
-        # 1. 從資料庫讀取最新球員資料
-        players_df = df(con, "SELECT player_id, name, position, grade_year FROM players ORDER BY created_at DESC")
-        
-        if not players_df.empty:
-            # 2. 使用 st.data_editor 顯示可編輯表格
-            # 我們禁用 player_id 的編輯，因為它是資料庫的主鍵 (Primary Key)
-            edited_df = st.data_editor(
-                players_df,
-                key="players_table_editor",
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "player_id": st.column_config.TextColumn("ID", disabled=True, width="small"),
-                    "name": st.column_config.TextColumn("姓名", required=True),
-                    "position": st.column_config.SelectboxColumn(
-                        "位置", 
-                        options=["主攻", "攔中", "副攻", "舉球", "自由"],
-                        required=False
-                    ),
-                    "grade_year": "年級"
-                }
-            )
+    st.subheader("🏐 球員名單管理")
+    st.caption("說明：點擊表格底部的「+」可新增球員；雙擊儲存格可修改；選取行後按 Delete 可刪除。")
+
+    # 1. 從資料庫讀取資料 (包含背號)
+    # 我們依然要把 player_id 讀出來，但在顯示時隱藏它
+    query = "SELECT player_id, name, jersey_number, position, grade_year FROM players ORDER BY jersey_number ASC"
+    players_df = df(con, query)
+
+    # 2. 設定表格配置
+    edited_df = st.data_editor(
+        players_df,
+        key="main_players_editor",
+        use_container_width=True,
+        num_rows="dynamic",  # 開啟動態增減行功能
+        hide_index=True,
+        column_config={
+            "player_id": None, # 【關鍵】隱藏 ID 欄位，但它依然存在於資料中
+            "name": st.column_config.TextColumn("姓名", required=True, width="medium"),
+            "jersey_number": st.column_config.NumberColumn("背號", min_value=0, max_value=99, format="%d"),
+            "position": st.column_config.SelectboxColumn(
+                "位置", 
+                options=["主攻", "攔中", "副攻", "舉球", "自由", "未定"],
+                width="small"
+            ),
+            "grade_year": st.column_config.TextColumn("年級", width="small")
+        }
+    )
+
+    # 3. 儲存按鈕與後端邏輯
+    col_btn, _ = st.columns([1, 3])
+    if col_btn.button("💾 儲存所有變更", type="primary", use_container_width=True):
+        try:
+            # 為了確保資料同步，最保險的做法是先清空再重新寫入 (或比對變動)
+            # 在小規模系統中，我們採用「同步更新」邏輯：
             
-            # 3. 儲存修改的按鈕
-            # 當使用者改完表格後，按下此按鈕會將整張表的狀態寫回資料庫
-            if st.button("儲存所有修改", type="primary", use_container_width=True):
-                try:
-                    for _, row in edited_df.iterrows():
-                        exec_one(con, """
-                            UPDATE players 
-                            SET name = ?, position = ?, grade_year = ? 
-                            WHERE player_id = ?
-                        """, (row['name'], row['position'], row['grade_year'], int(row['player_id'])))
-                    st.success("所有修改已成功存入資料庫！")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"更新過程中發生錯誤：{e}")
-        else:
-            st.info("目前尚無球員資料，請由左側新增。")
+            # A. 先找出被刪除的 ID (原本在 players_df 但不在 edited_df 裡的)
+            original_ids = set(players_df['player_id'].dropna().unique())
+            current_ids = set(edited_df['player_id'].dropna().unique())
+            deleted_ids = original_ids - current_ids
+            
+            for d_id in deleted_ids:
+                exec_one(con, "DELETE FROM players WHERE player_id = ?", (int(d_id),))
+
+            # B. 更新舊有資料 或 新增全新資料
+            for _, row in edited_df.iterrows():
+                # 如果 player_id 是空的，代表是按「+」新增的列
+                if pd.isna(row['player_id']):
+                    exec_one(con, """
+                        INSERT INTO players (name, jersey_number, position, grade_year) 
+                        VALUES (?, ?, ?, ?)
+                    """, (row['name'], row['jersey_number'], row['position'], row['grade_year']))
+                else:
+                    # 如果有 ID，則更新舊資料
+                    exec_one(con, """
+                        UPDATE players 
+                        SET name = ?, jersey_number = ?, position = ?, grade_year = ? 
+                        WHERE player_id = ?
+                    """, (row['name'], row['jersey_number'], row['position'], row['grade_year'], int(row['player_id'])))
+            
+            st.success("名單已同步至雲端資料庫！")
+            st.rerun()
+        except Exception as e:
+            st.error(f"儲存失敗：{e}")
 
 # ---- Tab 2: Drills (按鈕加色 + 簡約版) ----
 with tab2:
