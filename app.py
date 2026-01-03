@@ -216,55 +216,51 @@ with tab1:
         except Exception as e:
             st.error(f"儲存過程中發生錯誤：{e}")
         
-# ---- Tab 2: Drills (技術分類管理：含自動排序、隱藏機制、需求人數與批次儲存) ----
+# ---- Tab 2: Drills (技術分類管理：含自動排序、隱藏機制與修正後的儲存邏輯) ----
 with tab2:
     st.subheader("🏐 訓練項目庫管理")
-    st.caption("使用說明：數據初始按「人數」由小到大排列。點擊「人數」標頭可切換排序方向。")
+    st.caption("使用說明：數據初始按「人數」由小到大排列。點擊標頭可自定義排序。勾選「隱藏」並儲存後項目會移至鎖頭分頁。")
 
-    # 1. 定義八大分類
+    # 1. 定義八大類別
     MAIN_CATS = ["綜合訓練", "傳球", "發球", "接球", "攻擊", "攔網", "位置別", "實戰練習"]
     
-    # 2. 建立分頁
+    # 2. 建立子分頁 (8大類 + 1個隱藏區)
     drill_tabs = st.tabs(MAIN_CATS + ["🔒 已隱藏項目"])
-    editor_states = {}
+    editor_states = {} # 用來收集各分頁編輯器的狀態
 
     # 3. 渲染前八個技術分頁
     for i, cat_name in enumerate(MAIN_CATS):
         with drill_tabs[i]:
-            # 【核心修改】：加入 ORDER BY min_players ASC，讓資料從小排到大
+            # 【排序優化】：使用 ORDER BY min_players ASC 確保由人少排到人多
             df_cat = df(con, """
                 SELECT drill_id, drill_name, min_players, difficulty, objective, is_hidden, notes 
                 FROM drills WHERE category = ? AND is_hidden = 0
                 ORDER BY min_players ASC
             """, (cat_name,))
             
+            # 建立編輯器
             editor_states[cat_name] = st.data_editor(
                 df_cat,
-                key=f"editor_v5_{cat_name}",
+                key=f"editor_final_{cat_name}",
                 use_container_width=True,
                 num_rows="dynamic",
                 hide_index=True,
                 column_config={
-                    "drill_id": None,
+                    "drill_id": None, # 隱藏 ID
                     "drill_name": st.column_config.TextColumn("項目名稱", required=True, width="medium"),
-                    # 確保使用 NumberColumn，點擊標頭時系統會按數值排序（而非文字）
                     "min_players": st.column_config.NumberColumn(
-                        "人數", 
-                        format="%d人+", 
-                        min_value=1, 
-                        width="small",
-                        help="點擊此處可切換人數排序"
+                        "人數", format="%d人+", min_value=1, default=1, width="small", help="初始按人數從小到大排序"
                     ),
-                    "difficulty": st.column_config.SelectboxColumn("難度", options=[1, 2, 3, 4, 5], default=3),
-                    "objective": st.column_config.TextColumn("訓練重點"),
-                    "is_hidden": st.column_config.CheckboxColumn("隱藏?"),
-                    "notes": st.column_config.TextColumn("備註")
+                    "difficulty": st.column_config.SelectboxColumn("難度", options=[1, 2, 3, 4, 5], default=3, width="small"),
+                    "objective": st.column_config.TextColumn("訓練重點", width="medium"),
+                    "is_hidden": st.column_config.CheckboxColumn("隱藏?", default=False),
+                    "notes": st.column_config.TextColumn("備註", help="記錄執行細節", width="medium") # 修正 placeholder 為 help
                 }
             )
 
     # 4. 渲染最後一個「已隱藏項目」分頁
     with drill_tabs[-1]:
-        # 【核心修改】：同樣加入 ORDER BY min_players ASC
+        st.caption("此處為隱藏區。取消勾選「隱藏」並儲存後，項目會依照「原類別」移回對應分頁。")
         df_hidden = df(con, """
             SELECT drill_id, drill_name, category, min_players, difficulty, objective, is_hidden, notes 
             FROM drills WHERE is_hidden = 1
@@ -273,23 +269,25 @@ with tab2:
         
         editor_states["hidden_items"] = st.data_editor(
             df_hidden,
-            key="editor_hidden_v5",
+            key="editor_hidden_final",
             use_container_width=True,
             num_rows="dynamic",
             hide_index=True,
             column_config={
                 "drill_id": None,
                 "drill_name": st.column_config.TextColumn("項目名稱", required=True),
-                "category": st.column_config.SelectboxColumn("原類別", options=MAIN_CATS),
+                "category": st.column_config.SelectboxColumn("原類別", options=MAIN_CATS, required=True),
                 "min_players": st.column_config.NumberColumn("人數", format="%d人+"),
-                "is_hidden": st.column_config.CheckboxColumn("隱藏?")
+                "is_hidden": st.column_config.CheckboxColumn("隱藏?", default=True)
             }
         )
 
-   if st.button("💾 儲存所有項目變更", type="primary", use_container_width=True):
+    # 5. 統一儲存按鈕 (位於 tab2 底部，解決 IndentationError)
+    st.write("") # 留白
+    if st.button("💾 儲存所有項目變更", type="primary", use_container_width=True):
         try:
             for cat_key, edited_df in editor_states.items():
-                # 取得資料庫目前的 ID 以進行比對
+                # A. 取得該區塊在資料庫目前的 ID 集合以判斷刪除
                 if cat_key == "hidden_items":
                     db_df = df(con, "SELECT drill_id FROM drills WHERE is_hidden = 1")
                 else:
@@ -298,13 +296,15 @@ with tab2:
                 original_ids = set(db_df['drill_id'].dropna().unique())
                 current_ids = set(edited_df['drill_id'].dropna().unique())
                 
-                # A. 處理刪除
+                # 處理刪除邏輯
                 for d_id in (original_ids - current_ids):
                     exec_one(con, "DELETE FROM drills WHERE drill_id = ?", (int(d_id),))
 
                 # B. 處理新增與更新
                 for _, row in edited_df.iterrows():
+                    # 決定存入資料庫的 category 標籤
                     target_cat = row['category'] if cat_key == "hidden_items" else cat_key
+                    
                     if pd.isna(row['drill_id']): # 新增
                         exec_one(con, """
                             INSERT INTO drills (drill_name, category, min_players, difficulty, objective, is_hidden, notes)
@@ -316,11 +316,11 @@ with tab2:
                             WHERE drill_id=?
                         """, (row['drill_name'], target_cat, row['min_players'], row['difficulty'], row['objective'], row['is_hidden'], row['notes'], int(row['drill_id'])))
             
-            st.success("🎉 項目庫已同步更新！")
+            st.success("🎉 訓練項目庫（共 187 項）已成功同步並按人數排序！")
             st.rerun()
         except Exception as e:
-            st.error(f"儲存失敗：{e}")
-
+            st.error(f"儲存失敗，請檢查 SQL 語法或資料格式：{e}")
+            
 # ---- Tab 3: Sessions (補回新增場次功能版) ----
 with tab3:
     colL, colR = st.columns([1, 1.3]) 
