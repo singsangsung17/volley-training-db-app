@@ -122,68 +122,81 @@ with st.sidebar:
 
 tab1, tab2, tab3, tab4, tab5 = st.tabs(["球員 players", "訓練項目 drills", "訓練場次 sessions", "成效紀錄 drill_results", "分析（SQL）"])
 
-# ---- Tab 1: Players (極簡動態管理版) ----
+# ---- Tab 1: Players (極簡版：含背號、自定義年級、備註) ----
 with tab1:
     st.subheader("🏐 球員名單管理")
-    st.caption("說明：點擊表格底部的「+」可新增球員；雙擊儲存格可修改；選取行後按 Delete 可刪除。")
+    st.caption("使用說明：1. 下拉選擇年級，若選『其他』請在後方欄位填寫。 2. 備註可記錄傷病或特殊提醒。 3. 點擊『儲存』寫入資料庫。")
 
-    # 1. 從資料庫讀取資料 (包含背號)
-    # 我們依然要把 player_id 讀出來，但在顯示時隱藏它
-    query = "SELECT player_id, name, jersey_number, position, grade_year FROM players ORDER BY jersey_number ASC"
-    players_df = df(con, query)
+    # 1. 讀取資料並進行「UI 預處理」
+    # 增加讀取 notes 欄位
+    raw_players = df(con, "SELECT player_id, jersey_number, name, grade_year, position, notes FROM players ORDER BY jersey_number ASC")
+    
+    STANDARD_GRADES = ["一年級", "二年級", "三年級", "四年級", "碩一", "碩二"]
+    
+    processed_data = []
+    for _, row in raw_players.iterrows():
+        g = row['grade_year']
+        if g in STANDARD_GRADES or not g:
+            row_grade_sel = g if g else "一年級"
+            row_grade_custom = ""
+        else:
+            row_grade_sel = "其他"
+            row_grade_custom = g
+            
+        processed_data.append({
+            "player_id": row['player_id'],
+            "jersey_number": row['jersey_number'],
+            "name": row['name'],
+            "grade_sel": row_grade_sel,
+            "grade_custom": row_grade_custom,
+            "position": row['position'],
+            "notes": row['notes'] # 讀取備註
+        })
+    
+    display_df = pd.DataFrame(processed_data)
 
     # 2. 設定表格配置
     edited_df = st.data_editor(
-        players_df,
-        key="main_players_editor",
+        display_df,
+        key="pro_players_editor_v2",
         use_container_width=True,
-        num_rows="dynamic",  # 開啟動態增減行功能
+        num_rows="dynamic",
         hide_index=True,
         column_config={
-            "player_id": None, # 【關鍵】隱藏 ID 欄位，但它依然存在於資料中
+            "player_id": None, 
+            "jersey_number": st.column_config.NumberColumn("#", min_value=0, max_value=99, format="%d", width="small"),
             "name": st.column_config.TextColumn("姓名", required=True, width="medium"),
-            "jersey_number": st.column_config.NumberColumn("背號", min_value=0, max_value=99, format="%d"),
-            "position": st.column_config.SelectboxColumn(
-                "位置", 
-                options=["主攻", "攔中", "副攻", "舉球", "自由", "未定"],
-                width="small"
-            ),
-            "grade_year": st.column_config.TextColumn("年級", width="small")
+            "grade_sel": st.column_config.SelectboxColumn("年級", options=STANDARD_GRADES + ["其他"], width="small"),
+            "grade_custom": st.column_config.TextColumn("其他(填寫)", width="small"),
+            "position": st.column_config.SelectboxColumn("位置", options=["主攻", "攔中", "副攻", "舉球", "自由", "未定"], width="small"),
+            "notes": st.column_config.TextColumn("備註", placeholder="例：左撇子、曾膝蓋受傷", width="large") # 增加備註配置
         }
     )
 
-    # 3. 儲存按鈕與後端邏輯
-    col_btn, _ = st.columns([1, 3])
-    if col_btn.button("💾 儲存所有變更", type="primary", use_container_width=True):
+    # 3. 儲存邏輯
+    if st.button("💾 儲存名單變更", type="primary", use_container_width=True):
         try:
-            # 為了確保資料同步，最保險的做法是先清空再重新寫入 (或比對變動)
-            # 在小規模系統中，我們採用「同步更新」邏輯：
-            
-            # A. 先找出被刪除的 ID (原本在 players_df 但不在 edited_df 裡的)
-            original_ids = set(players_df['player_id'].dropna().unique())
+            original_ids = set(raw_players['player_id'].dropna().unique())
             current_ids = set(edited_df['player_id'].dropna().unique())
-            deleted_ids = original_ids - current_ids
-            
-            for d_id in deleted_ids:
+            for d_id in (original_ids - current_ids):
                 exec_one(con, "DELETE FROM players WHERE player_id = ?", (int(d_id),))
 
-            # B. 更新舊有資料 或 新增全新資料
             for _, row in edited_df.iterrows():
-                # 如果 player_id 是空的，代表是按「+」新增的列
+                final_grade = row['grade_custom'] if row['grade_sel'] == "其他" else row['grade_sel']
+                
                 if pd.isna(row['player_id']):
                     exec_one(con, """
-                        INSERT INTO players (name, jersey_number, position, grade_year) 
-                        VALUES (?, ?, ?, ?)
-                    """, (row['name'], row['jersey_number'], row['position'], row['grade_year']))
+                        INSERT INTO players (name, jersey_number, position, grade_year, notes) 
+                        VALUES (?, ?, ?, ?, ?)
+                    """, (row['name'], row['jersey_number'], row['position'], final_grade, row['notes']))
                 else:
-                    # 如果有 ID，則更新舊資料
                     exec_one(con, """
                         UPDATE players 
-                        SET name = ?, jersey_number = ?, position = ?, grade_year = ? 
+                        SET name = ?, jersey_number = ?, position = ?, grade_year = ?, notes = ? 
                         WHERE player_id = ?
-                    """, (row['name'], row['jersey_number'], row['position'], row['grade_year'], int(row['player_id'])))
+                    """, (row['name'], row['jersey_number'], row['position'], final_grade, row['notes'], int(row['player_id'])))
             
-            st.success("名單已同步至雲端資料庫！")
+            st.success("名單同步成功！")
             st.rerun()
         except Exception as e:
             st.error(f"儲存失敗：{e}")
