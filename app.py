@@ -317,61 +317,66 @@ with tab2:
         except Exception as e:
             st.error(f"儲存失敗：{e}")
             
-# ---- Tab 3: Sessions (專業訓練安排：正序導航與負荷監控) ----
+# ---- Tab 3: Sessions (智慧排球訓練中控台) ----
 with tab3:
-    # --- 0. 專業操作指引 (UX 優化) ---
-    st.info("🏐 **規劃邏輯**：1. 定位場次日期 → 2. 標記預計出席 (確認人數) → 3. 編排流程 (監控神經負荷與總時間)")
+    # 1. 資料庫自動修復邏輯 (解決 image_1ce5c3.png 的欄位缺失問題)
+    try:
+        existing_cols = [row[1] for row in con.execute("PRAGMA table_info(sessions)").fetchall()]
+        if 'phase' not in existing_cols:
+            exec_one(con, "ALTER TABLE sessions ADD COLUMN phase TEXT DEFAULT '基礎期'")
+        if 'target_duration' not in existing_cols:
+            exec_one(con, "ALTER TABLE sessions ADD COLUMN target_duration INTEGER DEFAULT 120")
+    except Exception as e:
+        st.error(f"資料庫升級錯誤: {e}")
 
-    # 獲取基礎資料 (依日期正序排列，日期早的在上面)
+    # 獲取場次資料 (依日期正序 ASC，日期早的在上面)
     sess_df = df(con, "SELECT session_id, session_date, theme, phase, target_duration FROM sessions ORDER BY session_date ASC")
 
     if sess_df.empty:
-        st.warning("⚠️ 目前資料庫中無任何場次。請利用頁面下方的「賽季週期藍圖工具」生成場次。")
+        st.warning("⚠️ 目前無場次。請利用最下方的「賽季週期藍圖工具」生成場次。")
     else:
-        # --- 第一階段：場次選取與設定 (日期正序 + 智慧定位) ---
+        # --- 第一階段：場次定位與設定 ---
         st.markdown("### 🎯 第一階段：場次定位與設定")
         
-        # 智慧選取：自動找出與今天 (2026-01-05) 最接近的場次索引
+        # 【智慧定位】：自動計算並定位至與今天 (2026-01-05) 最接近的場次
         sess_df['date_dt'] = pd.to_datetime(sess_df['session_date'])
         now = pd.Timestamp.now().normalize()
-        default_idx = (sess_df['date_dt'] - now).abs().idxmin() 
-
-        # 顯示選單：日期早的在上面
+        smart_idx = (sess_df['date_dt'] - now).abs().idxmin() 
+        
         s_options = {int(r.session_id): f"📅 {r.session_date} | {r.phase} | {r.theme}" for r in sess_df.itertuples()}
         s_list = list(s_options.keys())
         
-        # 選擇場次選單
+        # 渲染選單：日期早的在上面，自動選中最近場次
         current_sid = st.selectbox(
-            "🎯 選擇目前規劃場次 (依日期正序)", 
+            "選擇目前規劃場次 (依日期正序)", 
             options=s_list, 
-            index=int(default_idx), # 自動定位到最接近今天的場次
+            index=int(sess_df.index.get_loc(smart_idx)),
             format_func=lambda x: s_options[x]
         )
 
-        # 本場設定與刪除功能 (保持全寬度佈局)
-        curr_s_data = sess_df[sess_df['session_id'] == current_sid].iloc[0]
+        curr_s = sess_df[sess_df['session_id'] == current_sid].iloc[0]
         with st.container(border=True):
             c_th, c_ph, c_tm, c_del = st.columns([2.5, 1, 1, 0.8])
             with c_th:
-                u_theme = st.text_input("本場訓練主題", value=curr_s_data['theme'])
+                u_theme = st.text_input("本場訓練主題", value=curr_s['theme'])
             with c_ph:
-                u_phase = st.selectbox("週期相位", ["基礎期", "強化期", "巔峰期", "恢復期"], index=["基礎期", "強化期", "巔峰期", "恢復期"].index(curr_s_data['phase']))
+                u_phase = st.selectbox("週期相位", ["基礎期", "強化期", "巔峰期", "恢復期"], 
+                                      index=["基礎期", "強化期", "巔峰期", "恢復期"].index(curr_s['phase']))
             with c_tm:
-                u_dur = st.number_input("目標總時長 (min)", value=int(curr_s_data['target_duration']), step=10)
+                u_dur = st.number_input("預計時長 (min)", value=int(curr_s['target_duration']), step=10)
             with c_del:
                 st.write("") # 垂直對齊
                 if st.button("🗑️ 刪除", type="secondary", use_container_width=True):
                     exec_one(con, "DELETE FROM sessions WHERE session_id = ?", (current_sid,))
                     st.rerun()
             
-            if u_theme != curr_s_data['theme'] or u_phase != curr_s_data['phase'] or u_dur != curr_s_data['target_duration']:
-                if st.button("💾 儲存場次設定變更", type="primary", use_container_width=True):
-                    exec_one(con, "UPDATE sessions SET theme=?, phase=?, target_duration=? WHERE session_id=?", (u_theme, u_phase, u_dur, current_sid))
-                    st.rerun()
+            if st.button("💾 儲存場次設定變更", type="primary", use_container_width=True):
+                exec_one(con, "UPDATE sessions SET theme=?, phase=?, target_duration=? WHERE session_id=?", (u_theme, u_phase, u_dur, current_sid))
+                st.rerun()
 
         st.divider()
 
-        # --- 第二階段：預計出席與流程編排 (並列佈局) ---
+        # --- 第二階段：預計出席與流程編排 ---
         col_l, col_r = st.columns([1, 2.2])
 
         with col_l:
@@ -381,74 +386,60 @@ with tab3:
             att_map = dict(zip(att_curr['player_id'], att_curr['status']))
             
             with st.container(border=True):
-                new_att_states = {}
+                new_att = {}
                 for _, p in players_all.iterrows():
-                    new_att_states[p['player_id']] = st.selectbox(f"{p['name']}", ["出席", "請假", "遲到", "缺席"], 
-                                                                  index=["出席", "請假", "遲到", "缺席"].index(att_map.get(p['player_id'], "出席")), key=f"att_final_{p['player_id']}")
-                if st.button("💾 更新出席狀態", type="primary", use_container_width=True):
-                    for pid, stat in new_att_states.items():
+                    new_att[p['player_id']] = st.selectbox(f"{p['name']}", ["出席", "請假", "遲到", "缺席"], 
+                                                           index=["出席", "請假", "遲到", "缺席"].index(att_map.get(p['player_id'], "出席")), key=f"att_s3_{p['player_id']}")
+                if st.button("💾 更新預計人數", type="primary", use_container_width=True):
+                    for pid, stat in new_att.items():
                         exec_one(con, "INSERT OR REPLACE INTO attendance (session_id, player_id, status) VALUES (?,?,?)", (current_sid, pid, stat))
                     st.rerun()
             
-            available_p = sum(1 for v in new_att_states.values() if v in ["出席", "遲到"])
-            st.metric("當前預計可用人數", f"{available_p} 人")
+            avail_p = sum(1 for v in new_att.values() if v in ["出席", "遲到"])
+            st.metric("當前預計可用人數", f"{avail_p} 人")
 
         with col_r:
             st.markdown("#### 🏐 2. 訓練流程編排")
             drills_lib = df(con, "SELECT drill_id, drill_name, category, min_players, neuromuscular_load FROM drills WHERE is_hidden=0")
             
-            c_cat_f, c_dril_f = st.columns([1, 2])
-            with c_cat_f:
-                sel_cat = st.selectbox("篩選分類", options=["全部項目"] + sorted(drills_lib['category'].unique().tolist()))
-            with c_dril_f:
-                f_drills = drills_lib if sel_cat=="全部項目" else drills_lib[drills_lib['category']==sel_cat]
-                # 名稱優先顯示：名稱 [人數+][負荷]
-                d_opts = {int(r.drill_id): f"{r.drill_name} [{r.min_players}人+][負荷:{r.neuromuscular_load}]" for r in f_drills.itertuples()}
-                sel_did = st.selectbox("選擇訓練項目", options=list(d_opts.keys()), format_func=lambda x: d_opts[x])
+            c_cat, c_dril = st.columns([1, 2])
+            sel_cat = c_cat.selectbox("篩選分類", options=["全部"] + sorted(drills_lib['category'].unique().tolist()))
+            f_drills = drills_lib if sel_cat=="全部" else drills_lib[drills_lib['category'] == sel_cat]
+            d_opts = {int(r.drill_id): f"{r.drill_name} [{r.min_players}人+][負荷:{r.neuromuscular_load}]" for r in f_drills.itertuples()}
+            sel_did = c_dril.selectbox("選擇教案", options=list(d_opts.keys()), format_func=lambda x: d_opts[x])
 
             cc1, cc2, cc3 = st.columns(3)
             with cc1:
                 seq = st.number_input("順序", value=int(con.execute("SELECT COALESCE(MAX(sequence_no),0)+1 FROM session_drills WHERE session_id=?", (current_sid,)).fetchone()[0]))
             with cc2:
-                p_min = st.number_input("預計分鐘", value=20, step=5)
+                p_min = st.number_input("時間 (min)", value=20, step=5)
             with cc3:
-                p_reps = st.text_input("預計量 (如: 3組)", "50下")
+                p_reps = st.text_input("預計量", "50下")
 
-            if st.button("➕ 加入此項至訓練流程", type="primary", use_container_width=True):
+            if st.button("➕ 加入訓練流程", type="primary", use_container_width=True):
                 exec_one(con, "INSERT OR REPLACE INTO session_drills (session_id, drill_id, sequence_no, planned_minutes, planned_reps) VALUES (?,?,?,?,?)", (current_sid, sel_did, seq, p_min, p_reps))
                 st.rerun()
 
             st.divider()
             
-            # --- 3. 流程清單與生理負荷分析 ---
-            flow_data = df(con, """
-                SELECT sd.sequence_no as 順序, d.drill_name as 內容, sd.planned_reps as 預計量, 
-                       d.neuromuscular_load as 負荷, sd.planned_minutes as 分鐘, d.min_players as 需人數 
-                FROM session_drills sd JOIN drills d ON d.drill_id=sd.drill_id 
-                WHERE sd.session_id=? ORDER BY sd.sequence_no
-            """, (current_sid,))
+            # 流程預覽與生理監控
+            flow = df(con, "SELECT sd.sequence_no as 順序, d.drill_name as 內容, sd.planned_reps as 預計量, d.neuromuscular_load as 負荷, sd.planned_minutes as 分鐘, d.min_players as 需人數 FROM session_drills sd JOIN drills d ON d.drill_id=sd.drill_id WHERE sd.session_id=? ORDER BY sd.sequence_no", (current_sid,))
 
-            if not flow_data.empty:
-                # 視覺化規劃時長
-                total_m = flow_data['分鐘'].sum()
-                st.write(f"⏱️ **時長佔用：{total_m} / {u_dur} min**")
-                st.progress(min(total_m / u_dur, 1.0))
+            if not flow.empty:
+                # 時長進度條
+                total_min = flow['分鐘'].sum()
+                st.write(f"⏱️ **規劃時長進度：{total_min} / {u_dur} min**")
+                st.progress(min(total_min / u_dur, 1.0))
 
                 k1, k2, k3 = st.columns(3)
-                k1.metric("平均神經強度", f"{flow_data['負荷'].mean():.1f}")
+                k1.metric("平均強度", f"{flow['負荷'].mean():.1f}")
                 # 神經肌肉衝量 (Load)
-                total_load = (flow_data['分鐘'] * flow_data['負荷']).sum()
-                k2.metric("神經衝量 (Load)", f"{total_load}", help="公式：Load = Intensity x Time")
-                k3.metric("最高人數需求", f"{flow_data['需人數'].max()}人")
+                total_load = (flow['分鐘'] * flow['負荷']).sum()
+                k2.metric("總神經衝量 (Load)", f"{total_load}", help="Load = Intensity x Time")
+                k3.metric("最高人數需求", f"{flow['需人數'].max()}人")
 
-                ed_flow = st.data_editor(
-                    flow_data, use_container_width=True, hide_index=True, num_rows="dynamic", key=f"ed_v14_{current_sid}",
-                    column_config={
-                        "內容": st.column_config.TextColumn(disabled=True),
-                        "負荷": st.column_config.NumberColumn(disabled=True),
-                        "需人數": st.column_config.NumberColumn(disabled=True)
-                    }
-                )
+                ed_flow = st.data_editor(flow, use_container_width=True, hide_index=True, num_rows="dynamic", key=f"ed_s3_{current_sid}",
+                                         column_config={"內容": st.column_config.TextColumn(disabled=True), "負荷": st.column_config.NumberColumn(disabled=True)})
 
                 if st.button("💾 儲存流程編輯結果", type="primary", use_container_width=True):
                     exec_one(con, "DELETE FROM session_drills WHERE session_id=?", (current_sid,))
@@ -456,61 +447,55 @@ with tab3:
                         did = con.execute("SELECT drill_id FROM drills WHERE drill_name=?", (r['內容'],)).fetchone()[0]
                         exec_one(con, "INSERT INTO session_drills (session_id, drill_id, sequence_no, planned_minutes, planned_reps) VALUES (?,?,?,?,?)", (current_sid, did, r['順序'], r['分鐘'], r['預計量']))
                     st.rerun()
-                if available_p < flow_data['需人數'].max(): st.error("⚠️ 警告：目前可用人數不足！")
-            else:
-                st.info("尚無流程，請挑選教案。")
+                if avail_p < flow['需人數'].max(): st.error("⚠️ 警告：目前可用人數不足！")
 
-    # --- 第三階段：賽季週期藍圖 (移至底部) ---
+    # --- 第三階段：賽季週期藍圖工具 (移至底部) ---
     st.divider()
-    with st.expander("📅 賽季週期藍圖 (批量生成訓練場次)"):
+    with st.expander("📅 第三階段：賽季週期藍圖 (批量生成訓練場次)"):
         bc1, bc2, bc3 = st.columns([1, 1, 1])
         with bc1:
-            b_start_d = st.date_input("開始日期", key="batch_sd_final")
-            b_end_d = st.date_input("結束日期", key="batch_ed_final")
+            b_s = st.date_input("開始日期", key="batch_s_final")
+            b_e = st.date_input("結束日期", key="batch_e_final")
         with bc2:
-            b_days = st.multiselect("固定練習日", ["週一", "週二", "週三", "週四", "週五", "週六", "週日"], default=["週一", "週三", "週五"])
+            b_d = st.multiselect("練球日", ["週一", "週二", "週三", "週四", "週五", "週六", "週日"], default=["週一", "週三", "週五"])
         with bc3:
-            b_phase = st.selectbox("週期相位", ["基礎期", "強化期", "巔峰期", "恢復期"], key="batch_ph_final")
+            b_p = st.selectbox("賽季相位", ["基礎期", "強化期", "巔峰期", "恢復期"], key="batch_p_final")
         
-        if st.button("🚀 確認安排賽季週期場次", type="primary", use_container_width=True):
+        if st.button("🚀 確認安排週期場次", type="primary", use_container_width=True):
             from datetime import timedelta
             day_map = {"週一":0, "週二":1, "週三":2, "週四":3, "週五":4, "週六":5, "週日":6}
-            target_days = [day_map[d] for d in b_days]
-            curr, count = b_start_d, 0
-            while curr <= b_end_d:
+            target_days = [day_map[d] for d in b_d]
+            curr, count = b_s, 0
+            while curr <= b_e:
                 if curr.weekday() in target_days:
-                    exec_one(con, "INSERT INTO sessions (session_date, theme, phase, target_duration) VALUES (?, ?, ?, ?)", (str(curr), "常規技術訓練", b_phase, 120))
+                    exec_one(con, "INSERT INTO sessions (session_date, theme, phase, target_duration) VALUES (?, ?, ?, ?)", (str(curr), "常規訓練", b_p, 120))
                     count += 1
                 curr += timedelta(days=1)
-            st.success(f"已安排 {count} 場場次！")
+            st.success(f"已安排 {count} 場次！")
             st.rerun()
         
 # ---- Tab 4: Drill Results (正式點名、智慧定位與成效紀錄) ----
 with tab4:
-    # --- 0. 專業操作指引 ---
-    st.info("📊 **數據紀錄流程**：1. 確認實際出缺席 → 2. 選擇項目 → 3. 輸入數據 (系統自動檢核成功率)")
+    st.info("📊 **數據紀錄流程**：1. 確認正式點名 → 2. 選擇訓練項目 → 3. 輸入數據並檢核成功率")
 
-    # 獲取場次資料 (依日期正序，日期早的在上面)
+    # 獲取場次資料 (依日期正序 ASC)
     sess_df = df(con, "SELECT session_id, session_date, theme, phase FROM sessions ORDER BY session_date ASC")
     
     if sess_df.empty:
         st.warning("⚠️ 目前無場次資料，請先至 Tab 3 安排訓練。")
     else:
-        # --- 第一階段：場次選取 (智慧定位核心) ---
-        # 1. 建立選單選項
-        s_options = {int(r.session_id): f"📅 {r.session_date} | {r.theme}" for r in sess_df.itertuples()}
-        s_list = list(s_options.keys())
-
-        # 2. 【智慧定位】：自動找出與今天最接近的場次索引
+        # --- 第一階段：場次選取 (智慧定位) ---
         sess_df['date_dt'] = pd.to_datetime(sess_df['session_date'])
         now = pd.Timestamp.now().normalize()
-        default_idx = (sess_df['date_dt'] - now).abs().idxmin() # 找到時間差最小的資料列索引
+        smart_idx = (sess_df['date_dt'] - now).abs().idxmin()
         
-        # 3. 渲染選單，預設 index 為智慧定位的結果
+        s_options = {int(r.session_id): f"📅 {r.session_date} | {r.theme}" for r in sess_df.itertuples()}
+        s_list = list(s_options.keys())
+        
         sid = st.selectbox(
-            "🎯 選擇紀錄場次 (依日期正序，已自動定位最近日期)", 
+            "🎯 選擇紀錄場次 (依日期正序，已智慧定位最近日期)", 
             options=s_list, 
-            index=int(sess_df.index.get_loc(default_idx)), # 確保 index 與資料框對齊
+            index=int(sess_df.index.get_loc(smart_idx)),
             format_func=lambda x: s_options[x], 
             key="tab4_sid_final"
         )
@@ -518,8 +503,8 @@ with tab4:
         st.divider()
 
         # --- 第二階段：正式出缺席確認 (摺疊選單) ---
-        with st.expander("📝 本場正式出缺席確認 (請先鎖定點名再紀錄成績)", expanded=False):
-            st.caption("確認最終出席狀態後，下方紀錄表將自動過濾出在場球員。")
+        with st.expander("📝 正式出缺席確認 (請先確認點名狀態)", expanded=False):
+            st.caption("在此確認球員的最終出席狀態，這將自動過濾下方的紀錄名單。")
             players_all = df(con, "SELECT player_id, name, jersey_number FROM players ORDER BY name")
             curr_att = df(con, "SELECT player_id, status FROM attendance WHERE session_id=?", (sid,))
             att_map = dict(zip(curr_att['player_id'], curr_att['status']))
@@ -528,43 +513,42 @@ with tab4:
             new_final_status = {}
             for idx, p in players_all.iterrows():
                 with att_cols[idx % 2]:
-                    # 預設抓取 Tab 3 的預計狀態，若無則預設為出席
                     c_val = att_map.get(p['player_id'], "出席")
                     new_final_status[p['player_id']] = st.selectbox(
                         f"{p['name']} (#{p['jersey_number']})", 
                         ["出席", "請假", "遲到", "缺席"], 
                         index=["出席", "請假", "遲到", "缺席"].index(c_val), 
-                        key=f"f_att_final_{p['player_id']}_{sid}"
+                        key=f"f_att_s4_{p['player_id']}_{sid}"
                     )
             
-            if st.button("💾 鎖定本日出缺席狀態並同步名單", type="primary", use_container_width=True):
+            if st.button("💾 更新本日正式出缺席狀態", type="primary", use_container_width=True):
                 for pid, stat in new_final_status.items():
                     exec_one(con, "INSERT OR REPLACE INTO attendance (session_id, player_id, status) VALUES (?,?,?)", (sid, pid, stat))
-                st.success("點名狀態已更新！下表已同步過濾。")
+                st.success("點名狀態已更新！")
                 st.rerun()
 
         st.divider()
 
-        # --- 第三階段：訓練項目成效紀錄 ---
+        # --- 第三階段：項目成效紀錄 ---
         planned_drills = df(con, "SELECT d.drill_id, d.drill_name FROM session_drills sd JOIN drills d ON d.drill_id = sd.drill_id WHERE sd.session_id = ? ORDER BY sd.sequence_no", (sid,))
 
         if planned_drills.empty:
             st.info("此場次尚未安排訓練項目。")
         else:
-            sel_did = st.selectbox("選擇紀錄項目", options=planned_drills['drill_id'].tolist(),
+            sel_did = st.selectbox("選擇要紀錄的訓練項目", options=planned_drills['drill_id'].tolist(),
                                    format_func=lambda x: planned_drills[planned_drills['drill_id']==x]['drill_name'].values[0])
 
-            # 僅過濾出「出席」或「遲到」的人員進行紀錄
+            # 僅紀錄「出席」或「遲到」的人員
             present_p_list = [pid for pid, stat in new_final_status.items() if stat in ["出席", "遲到"]]
             
             if not present_p_list:
-                st.error("此場次無人出席。")
+                st.error("此場次無人出席，無法錄入數據。")
             else:
                 exist_res = df(con, "SELECT player_id, success_count, total_count, error_type, notes FROM drill_results WHERE session_id=? AND drill_id=?", (sid, sel_did))
                 final_players = players_all[players_all['player_id'].isin(present_p_list)]
                 record_df = final_players.merge(exist_res, on='player_id', how='left')
                 
-                # 初始化編輯數據
+                # 初始化數據
                 record_df['success_count'] = record_df['success_count'].fillna(0).astype(int)
                 record_df['total_count'] = record_df['total_count'].fillna(0).astype(int)
                 record_df['error_type'] = record_df['error_type'].fillna("無")
@@ -575,37 +559,37 @@ with tab4:
 
                 st.write(f"錄入對象：**{planned_drills[planned_drills['drill_id']==sel_did]['drill_name'].values[0]}**")
                 
-                # 編輯表格
+                # 數據編輯表格
                 edited_res = st.data_editor(
                     record_df[['player_id', 'name', 'success_count', 'total_count', '成功率%', 'error_type', 'notes']],
-                    use_container_width=True, hide_index=True, key=f"res_final_{sid}_{sel_did}",
+                    use_container_width=True, hide_index=True, key=f"res_s4_{sid}_{sel_did}",
                     column_config={
                         "player_id": None,
                         "name": st.column_config.TextColumn("球員", disabled=True),
                         "success_count": st.column_config.NumberColumn("成功次數", min_value=0),
                         "total_count": st.column_config.NumberColumn("總次數", min_value=0),
                         "成功率%": st.column_config.ProgressColumn("成功率視覺化", format="%f%%", min_value=0, max_value=100),
-                        "error_type": st.column_config.SelectboxColumn("主要失誤", options=["無", "腳步", "擊球點", "力道", "判斷", "反應慢"]),
-                        "notes": st.column_config.TextColumn("教練備註")
+                        "error_type": st.column_config.SelectboxColumn("失誤原因", options=["無", "腳步", "擊球點", "力道", "判斷", "反應慢"]),
+                        "notes": st.column_config.TextColumn("備註")
                     }
                 )
 
-                # 儲存與數據完整性檢查
-                if st.button("💾 儲存成效數據結果", type="primary", use_container_width=True):
-                    error_names = []
+                # 儲存與數據檢核 (總數 >= 成功數)
+                if st.button("💾 儲存本項訓練成效", type="primary", use_container_width=True):
+                    errors = []
                     for _, row in edited_res.iterrows():
                         if int(row['success_count']) > int(row['total_count']):
-                            error_names.append(row['name'])
+                            errors.append(row['name'])
                     
-                    if error_names:
-                        st.error(f"❌ 錯誤：球員 {', '.join(error_names)} 的「成功次數」大於「總次數」。請修正後再儲存。")
+                    if errors:
+                        st.error(f"❌ 錯誤：球員 {', '.join(errors)} 的成功次數大於總次數！請修正。")
                     else:
                         for _, row in edited_res.iterrows():
                             exec_one(con, """
                                 INSERT OR REPLACE INTO drill_results (session_id, drill_id, player_id, success_count, total_count, error_type, notes)
                                 VALUES (?, ?, ?, ?, ?, ?, ?)
                             """, (sid, sel_did, int(row['player_id']), int(row['success_count']), int(row['total_count']), row['error_type'], row['notes']))
-                        st.success("🎉 數據已同步至資料庫！")
+                        st.success("🎉 數據已同步儲存！")
                         st.rerun()
                 
 
