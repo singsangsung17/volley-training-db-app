@@ -317,24 +317,23 @@ with tab2:
         except Exception as e:
             st.error(f"儲存失敗：{e}")
             
-# ---- Tab 3: Sessions (佈局修正：全寬度按鈕與專業監控版) ----
+# ---- Tab 3: Sessions (顯示優化：名稱優先 + 生理監控版) ----
 with tab3:
     st.subheader("📅 訓練場次規劃與生理監控")
 
-    # --- A. 週期化訓練規劃 (修正：按鈕移出欄位以顯示全寬) ---
+    # --- A. 週期化訓練規劃 (全寬度佈局) ---
     with st.expander("⚙️ 週期化訓練規劃：自動生成場次", expanded=False):
         st.write("根據球隊固定練習時間，快速生成賽季訓練場次。")
         c1, c2, c3 = st.columns([1, 1, 1])
         with c1:
-            start_date = st.date_input("開始日期", key="s_start_v5")
-            end_date = st.date_input("結束日期", key="s_end_v5")
+            start_date = st.date_input("開始日期", key="s_start_v6")
+            end_date = st.date_input("結束日期", key="s_end_v6")
         with c2:
             days_options = ["週一", "週二", "週三", "週四", "週五", "週六", "週日"]
             fixed_days = st.multiselect("固定訓練日", days_options, default=["週一", "週三", "週五"])
         with c3:
             season_phase = st.selectbox("賽季相位", ["基礎期", "強化期", "巔峰期", "恢復期"])
         
-        # 修正點：按鈕放在 columns 之外，呈現全寬度
         if st.button("🚀 生成週期訓練場次", type="primary", use_container_width=True):
             day_map = {d: i for i, d in enumerate(days_options)}
             target_days = [day_map[d] for d in fixed_days]
@@ -365,8 +364,6 @@ with tab3:
         
         with col_att:
             st.markdown("#### 1. 預計出席設定")
-            st.caption("請先標記預計請假者。")
-            
             all_players = df(con, "SELECT player_id, name FROM players ORDER BY name")
             curr_att = df(con, "SELECT player_id, status FROM attendance WHERE session_id=?", (sid,))
             att_map = dict(zip(curr_att['player_id'], curr_att['status']))
@@ -376,9 +373,8 @@ with tab3:
                 for _, p in all_players.iterrows():
                     c_val = att_map.get(p['player_id'], "出席")
                     new_status[p['player_id']] = st.selectbox(f"{p['name']}", ["出席", "請假", "遲到", "缺席"], 
-                                                              index=["出席", "請假", "遲到", "缺席"].index(c_val), key=f"att_v5_{p['player_id']}")
+                                                              index=["出席", "請假", "遲到", "缺席"].index(c_val), key=f"att_v6_{p['player_id']}")
                 
-                # 修正點：點名按鈕寬度優化
                 if st.button("💾 更新預計出席狀態", type="primary", use_container_width=True):
                     for pid, stat in new_status.items():
                         exec_one(con, "INSERT OR REPLACE INTO attendance (session_id, player_id, status) VALUES (?,?,?)", (sid, pid, stat))
@@ -398,7 +394,8 @@ with tab3:
                 sel_cat = st.selectbox("篩選技術類別", options=["全部"] + all_cats)
             with c2:
                 filtered_drills = drills_master if sel_cat == "全部" else drills_master[drills_master['category'] == sel_cat]
-                d_opts = {int(r.drill_id): f"[{r.min_players}人+][負荷:{r.neuromuscular_load}] {r.drill_name}" for r in filtered_drills.itertuples()}
+                # 【修改重點】：調整 f-string 順序，將名稱放在最前面
+                d_opts = {int(r.drill_id): f"{r.drill_name} [{r.min_players}人+][負荷:{r.neuromuscular_load}]" for r in filtered_drills.itertuples()}
                 sel_did = st.selectbox("選擇訓練項目", options=list(d_opts.keys()), format_func=lambda x: d_opts[x])
 
             cc1, cc2, cc3 = st.columns(3)
@@ -410,7 +407,6 @@ with tab3:
             with cc3:
                 p_reps = st.text_input("預計量 (如: 3組)", "50下")
 
-            # 修正點：加入流程按鈕移出小欄位，防止縮在右邊
             if st.button("➕ 加入訓練流程", type="primary", use_container_width=True):
                 exec_one(con, "INSERT OR REPLACE INTO session_drills (session_id, drill_id, sequence_no, planned_minutes, planned_reps) VALUES (?,?,?,?,?)",
                          (sid, sel_did, seq, p_min, p_reps))
@@ -435,13 +431,13 @@ with tab3:
                 k3.metric(
                     "神經肌肉衝量 (Load)", 
                     f"{total_load}", 
-                    help="神經肌肉衝量 (Neuromuscular Impulse) 反映中樞神經系統在此場次承受的壓力總合。"
+                    help="神經肌肉衝量反映中樞神經系統在此場次承受的壓力總合。"
                 )
 
                 st.write("📋 流程清單 (點選行首並按 Delete 可移除項目)")
                 edited_flow = st.data_editor(
                     flow_df,
-                    key=f"flow_editor_v5_{sid}",
+                    key=f"flow_editor_v6_{sid}",
                     use_container_width=True,
                     num_rows="dynamic",
                     hide_index=True,
@@ -452,7 +448,6 @@ with tab3:
                     }
                 )
 
-                # 修正點：儲存按鈕全寬度顯示，與流程表格對齊
                 if st.button("💾 儲存訓練流程變更", type="primary", use_container_width=True):
                     exec_one(con, "DELETE FROM session_drills WHERE session_id = ?", (sid,))
                     for _, row in edited_flow.iterrows():
