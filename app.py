@@ -492,7 +492,7 @@ with tab3:
                         exec_one(con, "INSERT INTO session_drills (session_id, drill_id, sequence_no, planned_minutes, planned_reps) VALUES (?,?,?,?,?)", (current_sid, did, r['順序'], r['分鐘'], r['預計量']))
                     st.success("訓練流程同步完成！")
                     st.rerun()
-                if avail_p < flow['需人數'].max(): st.error(f"⚠️ 警報：今日可用人數 ({avail_p}) 不足以執行部分項目！")
+                if avail_p < flow['需人數'].max(): st.error(f"⚠️ 提醒：今日可用人數 ({avail_p}) 不足以執行部分項目！")
             else:
                 st.info("尚無流程，請由上方挑選教案。")
         
@@ -587,8 +587,8 @@ with tab4:
                         "player_id": None,
                         "name": st.column_config.TextColumn("球員", disabled=True),
                         "success_count": st.column_config.NumberColumn("成功次數", min_value=0),
-                        "total_count": st.column_config.NumberColumn("總次數 (需 ≥ 成功次數)", min_value=0),
-                        "成功率%": st.column_config.ProgressColumn("成功率視覺化", format="%f%%", min_value=0, max_value=100),
+                        "total_count": st.column_config.NumberColumn("總次數", min_value=0),
+                        "成功率%": st.column_config.ProgressColumn("成功率", format="%f%%", min_value=0, max_value=100),
                         "error_type": st.column_config.SelectboxColumn("主要失誤", options=["無", "腳步", "擊球點", "力道", "判斷", "反應慢"]),
                         "notes": st.column_config.TextColumn("備註")
                     }
