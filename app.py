@@ -317,7 +317,7 @@ with tab2:
         except Exception as e:
             st.error(f"儲存失敗：{e}")
             
-# ---- Tab 3: Sessions (專業排程：支援單項刪除與欄位優化) ----
+# ---- Tab 3: Sessions (專業排程：單項刪除與生理科學解釋強化版) ----
 with tab3:
     st.subheader("📅 訓練場次規劃與生理監控")
 
@@ -325,8 +325,8 @@ with tab3:
     with st.expander("⚙️ 批次排班工具：設定球隊固定練習時間", expanded=False):
         c1, c2, c3 = st.columns([1, 1, 1])
         with c1:
-            start_date = st.date_input("開始日期", key="b_start_v2")
-            end_date = st.date_input("結束日期", key="b_end_v2")
+            start_date = st.date_input("開始日期", key="b_start_final")
+            end_date = st.date_input("結束日期", key="b_end_final")
         with c2:
             days_options = ["週一", "週二", "週三", "週四", "週五", "週六", "週日"]
             fixed_days = st.multiselect("固定練習日", days_options, default=["週一", "週三", "週五"])
@@ -362,7 +362,7 @@ with tab3:
         
         with col_att:
             st.markdown("#### 1. 預計出席設定")
-            st.caption("先勾選請假者，系統將自動扣除人數。")
+            st.caption("先勾選請假者，系統將自動計算可用人數。")
             
             all_players = df(con, "SELECT player_id, name FROM players ORDER BY name")
             curr_att = df(con, "SELECT player_id, status FROM attendance WHERE session_id=?", (sid,))
@@ -373,12 +373,11 @@ with tab3:
                 for _, p in all_players.iterrows():
                     c_val = att_map.get(p['player_id'], "出席")
                     new_status[p['player_id']] = st.selectbox(f"{p['name']}", ["出席", "請假", "遲到", "缺席"], 
-                                                              index=["出席", "請假", "遲到", "缺席"].index(c_val), key=f"att_v2_{p['player_id']}")
+                                                              index=["出席", "請假", "遲到", "缺席"].index(c_val), key=f"att_v3_{p['player_id']}")
                 
                 if st.button("💾 更新預計人數", use_container_width=True):
                     for pid, stat in new_status.items():
                         exec_one(con, "INSERT OR REPLACE INTO attendance (session_id, player_id, status) VALUES (?,?,?)", (sid, pid, stat))
-                    st.success("人數已更新")
                     st.rerun()
 
             available_count = sum(1 for v in new_status.values() if v in ["出席", "遲到"])
@@ -387,7 +386,7 @@ with tab3:
         with col_plan:
             st.markdown("#### 2. 訓練流程編排")
             
-            # --- C. 教案選擇 (含分類與即時加入) ---
+            # --- C. 教案選擇 ---
             drills_master = df(con, "SELECT drill_id, drill_name, category, min_players, neuromuscular_load FROM drills WHERE is_hidden = 0")
             
             c1, c2 = st.columns([1, 2])
@@ -413,54 +412,68 @@ with tab3:
                          (sid, sel_did, seq, p_min, p_reps))
                 st.rerun()
 
-            # --- D. 流程顯示與「單項刪除」 (修正重點 1 & 2) ---
+            # --- D. 流程表 (支援單項刪除與專業小問號) ---
             st.divider()
-            # SQL 查詢：將 planned_reps (預計量) 放在 drill_name (內容) 旁邊
             flow_df = df(con, """
                 SELECT sd.sequence_no AS 順序, d.drill_name AS 內容, sd.planned_reps AS 預計量,
-                       d.neuromuscular_load AS 負荷, sd.planned_minutes AS 分鐘, d.min_players AS 需人數,
-                       sd.drill_id -- 隱藏用
+                       d.neuromuscular_load AS 負荷, sd.planned_minutes AS 分鐘, d.min_players AS 需人數
                 FROM session_drills sd JOIN drills d ON d.drill_id = sd.drill_id
                 WHERE sd.session_id = ? ORDER BY sd.sequence_no ASC
             """, (sid,))
 
             if not flow_df.empty:
-                # 計算生理負荷
+                # 負荷計算與生理學解釋
                 total_load = (flow_df['分鐘'] * flow_df['負荷']).sum()
                 avg_nm_load = flow_df['負荷'].mean()
                 
                 k1, k2, k3 = st.columns(3)
                 k1.metric("總練習時間", f"{flow_df['分鐘'].sum()} min")
                 k2.metric("平均神經強度", f"{avg_nm_load:.1f}")
-                k3.metric("總神經衝量", f"{total_load}")
+                # 【恢復小問號】：強化生理科學解釋
+                k3.metric(
+                    "神經肌肉衝量 (Load)", 
+                    f"{total_load}", 
+                    help="運動生理學計算公式：Σ(神經負荷強度 × 訓練分鐘數)。反映中樞神經系統(CNS)在該場次承受的壓力總量。"
+                )
 
-                # 顯示表格並支援單項刪除
-                st.write("📋 流程清單 (選取行並按 Delete 鍵可刪除單項，完成後點擊下方儲存)")
+                st.write("📋 流程清單 (點選行首並按 Delete 鍵可刪除項目)")
+                # 使用 data_editor 讓使用者可以刪除行
                 edited_flow = st.data_editor(
                     flow_df,
-                    key=f"flow_editor_{sid}",
+                    key=f"flow_editor_v3_{sid}",
                     use_container_width=True,
                     num_rows="dynamic",
                     hide_index=True,
-                    column_config={"drill_id": None} # 隱藏 ID
+                    column_config={
+                        "順序": st.column_config.NumberColumn(disabled=True),
+                        "內容": st.column_config.TextColumn(disabled=True),
+                        "負荷": st.column_config.NumberColumn(disabled=True),
+                        "需人數": st.column_config.NumberColumn(disabled=True)
+                    }
                 )
 
-                # 檢查是否有行被刪除
-                if len(edited_flow) < len(flow_df):
-                    if st.button("⚠️ 確認刪除所選單項", type="secondary"):
-                        # 找出被刪除的項目 (比對 sequence_no)
-                        orig_seqs = set(flow_df['順序'])
-                        curr_seqs = set(edited_flow['順序'])
-                        for s_no in (orig_seqs - curr_seqs):
-                            exec_one(con, "DELETE FROM session_drills WHERE session_id=? AND sequence_no=?", (sid, int(s_no)))
-                        st.success("單項已成功移除")
-                        st.rerun()
+                # 儲存與刪除按鈕 (常駐顯示)
+                if st.button("💾 儲存流程變更", type="primary", use_container_width=True):
+                    # 邏輯：先刪除該場次所有流程，再根據編輯器內容重新寫入
+                    # 這樣可以完美處理「刪除單行」或「修改順序/時間」
+                    exec_one(con, "DELETE FROM session_drills WHERE session_id = ?", (sid,))
+                    
+                    for _, row in edited_flow.iterrows():
+                        # 重新抓取 drill_id (透過名稱，因為顯示在表格的是名稱)
+                        d_id = con.execute("SELECT drill_id FROM drills WHERE drill_name = ?", (row['內容'],)).fetchone()[0]
+                        exec_one(con, """
+                            INSERT INTO session_drills (session_id, drill_id, sequence_no, planned_minutes, planned_reps)
+                            VALUES (?, ?, ?, ?, ?)
+                        """, (sid, int(d_id), int(row['順序']), int(row['分鐘']), row['預計量']))
+                    
+                    st.success("🎉 訓練流程已同步更新！")
+                    st.rerun()
 
-                # 人數警報提示
+                # 人數警報
                 if available_count < flow_df['需人數'].max():
-                    st.error(f"⚠️ 警告：目前預計人數 ({available_count}) 不足以執行部分高人數教案。")
+                    st.error(f"⚠️ 預警：今日可用人數 ({available_count}) 低於部分教案需求！")
             else:
-                st.info("目前尚無流程安排。")
+                st.info("目前尚未安排流程，請由上方挑選教案。")
         
 # ---- Tab 4: Results (終極巨型按鈕 + 確保過濾總結) ----
 with tab4:
