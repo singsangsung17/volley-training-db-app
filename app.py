@@ -317,17 +317,34 @@ with tab2:
         except Exception as e:
             st.error(f"儲存失敗：{e}")
             
-# ---- Tab 3: Sessions (顯示優化：名稱優先 + 生理監控版) ----
+# ---- Tab 3: Sessions (完全自明說明與專業排程版) ----
 with tab3:
-    st.subheader("📅 訓練場次規劃與生理監控")
+    # --- 0. 專業操作說明區 (UX 優化) ---
+    st.info("💡 **訓練規劃導覽：從賽季藍圖到現場執行**")
+    col_step1, col_step2, col_step3 = st.columns(3)
+    with col_step1:
+        st.markdown("""
+        **Step 1: 週期化排程**
+        利用上方摺疊區設定「固定練習日」，系統將自動生成整階段場次。請定義目前為基礎期或強化期，以獲得最佳負荷建議。
+        """)
+    with col_step2:
+        st.markdown("""
+        **Step 2: 預計出席管理**
+        排課前請先於左側標記「預計請假者」。系統會即時更新可用人數，並自動檢查教案的人數門檻，避免無效排課。
+        """)
+    with col_step3:
+        st.markdown("""
+        **Step 3: 生理負荷控管**
+        由 187 項教案中挑選項目。觀察「神經肌肉衝量」指標，確保總強度符合賽季相位，預防神經性過度訓練。
+        """)
 
-    # --- A. 週期化訓練規劃 (全寬度佈局) ---
-    with st.expander("⚙️ 週期化訓練規劃：自動生成場次", expanded=False):
-        st.write("根據球隊固定練習時間，快速生成賽季訓練場次。")
+    # --- A. 週期化訓練規劃 ---
+    with st.expander("⚙️ 週期化訓練規劃：自動生成全賽季場次", expanded=False):
+        st.write("設定球隊常規練習時間，系統將為您預先建立空白場次藍圖。")
         c1, c2, c3 = st.columns([1, 1, 1])
         with c1:
-            start_date = st.date_input("開始日期", key="s_start_v6")
-            end_date = st.date_input("結束日期", key="s_end_v6")
+            start_date = st.date_input("開始日期", key="s_start_v7")
+            end_date = st.date_input("結束日期", key="s_end_v7")
         with c2:
             days_options = ["週一", "週二", "週三", "週四", "週五", "週六", "週日"]
             fixed_days = st.multiselect("固定訓練日", days_options, default=["週一", "週三", "週五"])
@@ -345,7 +362,7 @@ with tab3:
                              (str(curr), "常規技術訓練", season_phase))
                     count += 1
                 curr += timedelta(days=1)
-            st.success(f"已成功為「{season_phase}」安排 {count} 場訓練場次！")
+            st.success(f"已生成 {count} 場場次！")
             st.rerun()
 
     st.divider()
@@ -373,7 +390,7 @@ with tab3:
                 for _, p in all_players.iterrows():
                     c_val = att_map.get(p['player_id'], "出席")
                     new_status[p['player_id']] = st.selectbox(f"{p['name']}", ["出席", "請假", "遲到", "缺席"], 
-                                                              index=["出席", "請假", "遲到", "缺席"].index(c_val), key=f"att_v6_{p['player_id']}")
+                                                              index=["出席", "請假", "遲到", "缺席"].index(c_val), key=f"att_v7_{p['player_id']}")
                 
                 if st.button("💾 更新預計出席狀態", type="primary", use_container_width=True):
                     for pid, stat in new_status.items():
@@ -394,7 +411,6 @@ with tab3:
                 sel_cat = st.selectbox("篩選技術類別", options=["全部"] + all_cats)
             with c2:
                 filtered_drills = drills_master if sel_cat == "全部" else drills_master[drills_master['category'] == sel_cat]
-                # 【修改重點】：調整 f-string 順序，將名稱放在最前面
                 d_opts = {int(r.drill_id): f"{r.drill_name} [{r.min_players}人+][負荷:{r.neuromuscular_load}]" for r in filtered_drills.itertuples()}
                 sel_did = st.selectbox("選擇訓練項目", options=list(d_opts.keys()), format_func=lambda x: d_opts[x])
 
@@ -413,6 +429,8 @@ with tab3:
                 st.rerun()
 
             st.divider()
+            
+            # --- 生理指標統計 ---
             flow_df = df(con, """
                 SELECT sd.sequence_no AS 順序, d.drill_name AS 內容, sd.planned_reps AS 預計量,
                        d.neuromuscular_load AS 負荷, sd.planned_minutes AS 分鐘, d.min_players AS 需人數
@@ -421,7 +439,6 @@ with tab3:
             """, (sid,))
 
             if not flow_df.empty:
-                # 生理負荷計算
                 total_load = (flow_df['分鐘'] * flow_df['負荷']).sum()
                 avg_nm_load = flow_df['負荷'].mean()
                 
@@ -431,13 +448,13 @@ with tab3:
                 k3.metric(
                     "神經肌肉衝量 (Load)", 
                     f"{total_load}", 
-                    help="神經肌肉衝量反映中樞神經系統在此場次承受的壓力總合。"
+                    help="公式：Σ(神經負荷強度 × 訓練時間)。反映中樞神經系統承受的總壓力。"
                 )
 
-                st.write("📋 流程清單 (點選行首並按 Delete 可移除項目)")
+                st.write("📋 當前流程 (點選行首並按 Delete 可移除，修改後請點儲存)")
                 edited_flow = st.data_editor(
                     flow_df,
-                    key=f"flow_editor_v6_{sid}",
+                    key=f"flow_editor_v7_{sid}",
                     use_container_width=True,
                     num_rows="dynamic",
                     hide_index=True,
@@ -460,9 +477,9 @@ with tab3:
                     st.rerun()
 
                 if available_count < flow_df['需人數'].max():
-                    st.error(f"⚠️ 警報：今日預計出席人數 ({available_count}人) 低於教案需求！")
+                    st.error(f"⚠️ 警報：今日可用人數 ({available_count}人) 低於教案人數需求！")
             else:
-                st.info("目前尚未安排任何訓練項目。")
+                st.info("目前尚未安排訓練項目。")
         
 # ---- Tab 4: Results (終極巨型按鈕 + 確保過濾總結) ----
 with tab4:
