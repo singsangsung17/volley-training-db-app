@@ -317,36 +317,37 @@ with tab2:
         except Exception as e:
             st.error(f"儲存失敗：{e}")
             
-# ---- Tab 3: Sessions (專業訓練安排與生理監控版) ----
+# ---- Tab 3: Sessions (佈局修正：全寬度按鈕與專業監控版) ----
 with tab3:
     st.subheader("📅 訓練場次規劃與生理監控")
 
-    # --- A. 週期化訓練規劃 (修正點：更換用語，非工作排班) ---
+    # --- A. 週期化訓練規劃 (修正：按鈕移出欄位以顯示全寬) ---
     with st.expander("⚙️ 週期化訓練規劃：自動生成場次", expanded=False):
         st.write("根據球隊固定練習時間，快速生成賽季訓練場次。")
         c1, c2, c3 = st.columns([1, 1, 1])
         with c1:
-            start_date = st.date_input("開始日期", key="s_start_date")
-            end_date = st.date_input("結束日期", key="s_end_date")
+            start_date = st.date_input("開始日期", key="s_start_v5")
+            end_date = st.date_input("結束日期", key="s_end_v5")
         with c2:
             days_options = ["週一", "週二", "週三", "週四", "週五", "週六", "週日"]
             fixed_days = st.multiselect("固定訓練日", days_options, default=["週一", "週三", "週五"])
         with c3:
             season_phase = st.selectbox("賽季相位", ["基礎期", "強化期", "巔峰期", "恢復期"])
-            # 恢復原本受好評的按鈕樣式
-            if st.button("🚀 生成週期訓練場次", type="primary", use_container_width=True):
-                day_map = {d: i for i, d in enumerate(days_options)}
-                target_days = [day_map[d] for d in fixed_days]
-                from datetime import timedelta
-                curr, count = start_date, 0
-                while curr <= end_date:
-                    if curr.weekday() in target_days:
-                        exec_one(con, "INSERT INTO sessions (session_date, theme, phase) VALUES (?, ?, ?)", 
-                                 (str(curr), "常規技術訓練", season_phase))
-                        count += 1
-                    curr += timedelta(days=1)
-                st.success(f"已成功為「{season_phase}」安排 {count} 場訓練場次！")
-                st.rerun()
+        
+        # 修正點：按鈕放在 columns 之外，呈現全寬度
+        if st.button("🚀 生成週期訓練場次", type="primary", use_container_width=True):
+            day_map = {d: i for i, d in enumerate(days_options)}
+            target_days = [day_map[d] for d in fixed_days]
+            from datetime import timedelta
+            curr, count = start_date, 0
+            while curr <= end_date:
+                if curr.weekday() in target_days:
+                    exec_one(con, "INSERT INTO sessions (session_date, theme, phase) VALUES (?, ?, ?)", 
+                             (str(curr), "常規技術訓練", season_phase))
+                    count += 1
+                curr += timedelta(days=1)
+            st.success(f"已成功為「{season_phase}」安排 {count} 場訓練場次！")
+            st.rerun()
 
     st.divider()
 
@@ -364,7 +365,7 @@ with tab3:
         
         with col_att:
             st.markdown("#### 1. 預計出席設定")
-            st.caption("請先標記預計請假者，以利系統精確計算訓練人數。")
+            st.caption("請先標記預計請假者。")
             
             all_players = df(con, "SELECT player_id, name FROM players ORDER BY name")
             curr_att = df(con, "SELECT player_id, status FROM attendance WHERE session_id=?", (sid,))
@@ -375,8 +376,9 @@ with tab3:
                 for _, p in all_players.iterrows():
                     c_val = att_map.get(p['player_id'], "出席")
                     new_status[p['player_id']] = st.selectbox(f"{p['name']}", ["出席", "請假", "遲到", "缺席"], 
-                                                              index=["出席", "請假", "遲到", "缺席"].index(c_val), key=f"att_v4_{p['player_id']}")
+                                                              index=["出席", "請假", "遲到", "缺席"].index(c_val), key=f"att_v5_{p['player_id']}")
                 
+                # 修正點：點名按鈕寬度優化
                 if st.button("💾 更新預計出席狀態", type="primary", use_container_width=True):
                     for pid, stat in new_status.items():
                         exec_one(con, "INSERT OR REPLACE INTO attendance (session_id, player_id, status) VALUES (?,?,?)", (sid, pid, stat))
@@ -388,7 +390,6 @@ with tab3:
         with col_plan:
             st.markdown("#### 2. 訓練流程編排")
             
-            # --- C. 教案選擇 (含分類與詳細標籤) ---
             drills_master = df(con, "SELECT drill_id, drill_name, category, min_players, neuromuscular_load FROM drills WHERE is_hidden = 0")
             
             c1, c2 = st.columns([1, 2])
@@ -409,12 +410,12 @@ with tab3:
             with cc3:
                 p_reps = st.text_input("預計量 (如: 3組)", "50下")
 
+            # 修正點：加入流程按鈕移出小欄位，防止縮在右邊
             if st.button("➕ 加入訓練流程", type="primary", use_container_width=True):
                 exec_one(con, "INSERT OR REPLACE INTO session_drills (session_id, drill_id, sequence_no, planned_minutes, planned_reps) VALUES (?,?,?,?,?)",
                          (sid, sel_did, seq, p_min, p_reps))
                 st.rerun()
 
-            # --- D. 流程顯示與數據監控 (保留神經肌肉衝量解釋) ---
             st.divider()
             flow_df = df(con, """
                 SELECT sd.sequence_no AS 順序, d.drill_name AS 內容, sd.planned_reps AS 預計量,
@@ -431,31 +432,28 @@ with tab3:
                 k1, k2, k3 = st.columns(3)
                 k1.metric("總練習時長", f"{flow_df['分鐘'].sum()} min")
                 k2.metric("平均神經強度", f"{avg_nm_load:.1f}")
-                # 【恢復專業解釋】：保留帶有小問號的解釋
                 k3.metric(
                     "神經肌肉衝量 (Load)", 
                     f"{total_load}", 
-                    help="神經肌肉衝量 (Neuromuscular Impulse) 計算公式為：Σ(神經負荷強度 × 訓練時間)。 反映中樞神經系統在此場次承受的壓力總合。"
+                    help="神經肌肉衝量 (Neuromuscular Impulse) 反映中樞神經系統在此場次承受的壓力總合。"
                 )
 
-                st.write("📋 當日流程清單 (選取行並按 Delete 可移除，完成後點擊儲存)")
+                st.write("📋 流程清單 (點選行首並按 Delete 可移除項目)")
                 edited_flow = st.data_editor(
                     flow_df,
-                    key=f"flow_editor_v4_{sid}",
+                    key=f"flow_editor_v5_{sid}",
                     use_container_width=True,
                     num_rows="dynamic",
                     hide_index=True,
                     column_config={
-                        "順序": st.column_config.NumberColumn(disabled=False),
                         "內容": st.column_config.TextColumn(disabled=True),
                         "負荷": st.column_config.NumberColumn(disabled=True),
                         "需人數": st.column_config.NumberColumn(disabled=True)
                     }
                 )
 
-                # 恢復您要求的綠色按鈕樣式 (Primary) 並常駐顯示
+                # 修正點：儲存按鈕全寬度顯示，與流程表格對齊
                 if st.button("💾 儲存訓練流程變更", type="primary", use_container_width=True):
-                    # 同步更新邏輯
                     exec_one(con, "DELETE FROM session_drills WHERE session_id = ?", (sid,))
                     for _, row in edited_flow.iterrows():
                         d_id = con.execute("SELECT drill_id FROM drills WHERE drill_name = ?", (row['內容'],)).fetchone()[0]
@@ -466,9 +464,8 @@ with tab3:
                     st.success("訓練流程已同步儲存！")
                     st.rerun()
 
-                # 人數警報顯示
                 if available_count < flow_df['需人數'].max():
-                    st.error(f"⚠️ 警報：今日預計出席人數 ({available_count}人) 低於部分教案的人數需求！")
+                    st.error(f"⚠️ 警報：今日預計出席人數 ({available_count}人) 低於教案需求！")
             else:
                 st.info("目前尚未安排任何訓練項目。")
         
